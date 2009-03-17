@@ -1,0 +1,612 @@
+CHANGES
+-------
+
+The major number changes for such things as code rewrites, changes in
+syntax, and/or dramatic changes in functionality. The minor number
+changes for corrections, enhancements, etc. made to the code. There
+is no set schedule for releases.
+
+--TODO--
+
+   +	Add ability to call ahead to a POP3 server to verify a user.
+   	Problem: needs a user password to truly validate the user.
+   	Suggested by Ryan Moore.
+
+   +	Add support for :port specifier with host name or IP in RHS
+   	of call-ahead-db records. Requested by Mark Hellegers.
+
+--1.10--
+
+   !	Postfix milter support does not provide many of the sendmail
+   	macros and may have broken {rcpt_addr} support in 2.5. So now
+   	when {rcpt_addr} is undefined, fall back on the original
+   	recipient argument given to the filterRcpt handler. In sendmail
+   	{rcpt_addr} might be different after virtusertable mapping.
+   	Reported by Alex Broens.
+
+   !	filterRcpt: check for empty string for {rcpt_addr} macro and use
+	the function argument instead if so. Reported by Zachary
+	Boschert.
+
+   !	Allow +ignore-rcpt-host in combination with +mx-lookup in order
+	to skip falling back on the {rcpt_host} value when no MX answers.
+	Requested by Sebastian Wiesinger.
+
+--1.9--
+
+   +	The call-ahead-db option now supports sendmail mailertable
+	formatted database. This allows the call-ahead-db to be
+	replaced by a mailertable directly without modification if
+	desired. The actual mailer portion of the right-hand-side is
+	ignored, except for error: and local:, which have special
+	meaning in sendmail. This facility will also work for
+	postfix's transport file, which has a similar format.
+	Requested by Alex Broens.
+
+--1.8--
+
+  !!	Fixed issue with +mx-lookups and mailertable, where using host
+	names (vs. IPs) within square brackets, which disables MX
+	lookups, would report a "DNS name not found" (rcode 3) error
+	looking up the MX records, before proceeding to try the actual
+	host name without square brakets. Reported by Greg Matthews.
+
+   !	milter-ahead-connect and milter-ahead-from tags failed to white
+	list through the max-failures options. Reported by Greg
+	Matthews.
+
+--1.7--
+
+   +	Requires LibSnert 1.64
+
+   +	Added missing is-blind-mx documentation. Reported by Uni
+	Bielefeld.
+
+   !	is-blind-mx: Since the documentation was missing and not all
+	admins. check the change log, some saw unexpected behaviour.
+	This option is now off by default to maintain original
+	historical behaviour. Requested by Hansjürg Wenger.
+
+   !	is-blind-mx: If the is-blind-mx test is disabled, the cache
+	lookups for blind hosts still could still prevent call-ahead
+	based on an old record. Added a guard condition to only check
+	the cache for blind hosts when the test is enabled.
+
+  !!	Cached 4xy temporary failure results should not transmute into
+	a 5xy rejection result. Reported by Uni Bielefeld. Have opted
+	not to cache any temporary failure, because many such results
+	can correct themselves before the cache entry expires,
+	resulting in unnecessary delays. Better to redo the call-ahead
+	in such cases.
+
+   !	LibSnert: socketCreateOpen() enhancement to support [hostname]:port
+   	syntax same as [IPv6]:port. This allows the RHS of records in
+   	the call-ahead-db to specify a port. See call-ahead-db option.
+
+--1.6--
+
+   +	Requires LibSnert 1.63
+
+   !	Restore access-db to its disabled by default at start-up. The
+   	change from short to long option format broke this.
+
+   +	Added is-blind-mx option. Remember if a downstream {rcpt_host}
+	falls into the accept- then- bounce class. Skip future call-
+	aheads and accept mail for such machines. Entry never expires.
+	Requested by FSL.
+
+   +	Cache SMTP responses & text reasons. A cache hit will report
+	the cached response instead of a generic "user unknown".
+	Requested by many.
+
+   !	atExitCleanUp(): added NULL guard around cache cleanup code in
+   	case its the cache was not initialised.
+
+   !	Hardcode exclusion for LAN and localhost from +primary-up-reject.
+
+   !	Corrected documentation error concerning two cache-type
+	options when it should have been cache-file and cache-type.
+
+   !	Recommended default for cache-reject-ttl lowered to 90000
+   	seconds.
+
+   +	access-db and call-ahead-db now support socket-map, flat-
+	file, and SQLite3 lookups in addition to Berkeley DB. The
+	SQLite3 behaviour can be disabled via LibSnert's ./configure
+	script.
+
+--1.5--
+
+   +	Requires LibSnert 1.62
+
+   +	Added NULL guards for rcpt_addr, rcpt_host, and rcpt_mailer
+	macros since they might be undefined because of a broken .mc
+	file or Postfix 2.3.
+
+   !	mxConnect(): The {if_addr} macro was used to compare against
+   	the MX list to see if our IP address is one of the MXes in
+   	order to determine the max. preference value. However,
+   	Postfix 2.3 does not support {if_addr} macro, so when its
+   	value is undefined, default to the value of the interface-ip
+   	option that is either specified or determined at startup.
+
+   !	When {if_addr}, {if_name}, and j macros are underfined fall
+   	back onto the value of interface-name instead of "[127.0.0.1]"
+   	for use with the call-ahead HELO.
+
+   !	The "looks like a local recipient, skipping" test has been
+	changed in order to support Postfix 2.3 which does not support
+	{rcpt_host} nor a mailertable. The options call-ahead-host,
+	call-ahead-db, and/or mx-lookup can be used to select the next
+	hop for the call-ahead. Failure to find a next hop is assumed
+	to be because the recipient is local to this host.
+
+   !	call-ahead-host now sets the rcpt_host earlier for logging.
+
+   +	verbose=db should apply to call-ahead-db even when access-db
+	is disabled.
+
+  !!	License 1.4 which provides additional details with regards to
+  	possible license controls used, the possibility of "phone
+  	home code" and its general contents, and related privacy
+  	statement.
+
+--1.4--
+
+   +	Requires LibSnert 1.61
+
+   +	Added cache-remove-all to the experimental SMTP commands:
+
+   		milter-ahead cache-remove-all
+
+   !	Moved "no acceptable MX server" log message to be immediately
+   	after the MX pruning / preference search loop, to better
+   	reflect what is beening reported.
+
+  !!	Complete replacement of option specification and no backwards.
+	compatibility. The newer format allows for better integration
+	of previously undocumented libsnert options and for the
+	inclusion of future enhancements.
+
+   !	filterClose(): remove reporting of "null workspace error",
+	which can occur when a client connection is rejected before or
+	by filterOpen().
+
+   !	Minor corrections for gcc -Wall warnings.
+
+   !	Fix possible race condition in updating cache entries. Replaced
+	cachePut() with cacheUpdate().
+
+   +	max-failures option added. If an SMTP client causes too many
+   	call-ahead failures, then it will be blocked until the cache
+   	entry expires. Requested by Kevin Brooks. Please note that the
+   	cache format has changed; discard the old cache.
+
+--1.3--
+
+   !	Requires LibSnert 1.60
+
+  !!	Due to too many support questions resulting from the addition of
+  	B/W list support, I've choosen to _disable_ by default the
+  	consultation of the access database. To enable it, explicitly
+  	specify the -f option:
+
+  		-f /etc/mail/sendmail.cf
+
+  	This will maintain historical pre-1.0 behaviour, which is less
+  	confusing for existing postmasters who upgraded.
+
+   !	Reverted back to libmilter's default (7210s) timeout. This
+	should silence many of the reported sendmail to milter timeout
+	errors and/or broken connections caused by the milter timing
+	out sooner than sendmail does with the current SMTP client.
+	The sendmail defaults for each SMTP command and receiving the
+	message content is 1h each and so libmilter allows for 2h 10s.
+	But in theory you could be DoS for between 5 and 104 hours per
+	connection. If you want to change this then set in
+	sendmail.mc:
+
+		define(`confTO_DATABLOCK',      `30m')
+		define(`confTO_COMMAND',        `5m')
+
+
+--1.2--
+
+   +	Requires LibSnert 1.59
+
+   !	With the addition of the B/W list support code, the -R option
+   	was broken such that the smfAccess*() functions by default
+   	denied the % relay hack (-Z +reject-percent-relay). The old
+   	behaviour has been restored (-Z -reject-percent-relay) and
+   	controlled through -R or -Z.
+
+   !	Fixed handling of negative responses vs socket errors. The
+   	former should still issue a QUIT to the server before closing
+   	the socket. Reported by Panagiotis Christias.
+
+   !	The -B option was causing a file descriptor leak. Reported by
+   	Simon Jones.
+
+   !	Added experimental code to implment milter specific SMTP
+	commands using the libmilter xxfi_unknown handler. This
+	requires BOTH sendmail and libmilter be built with
+
+   		APPENDDEF(`confENVDEF', `-DSMFI_VERSION=4')
+
+	specified in your devtools/Site/site.config.m4 file. This
+	would allow for an administrator to get and/or remove
+	individual cache entries without having to stop the milter.
+
+   	Command processing is restricted only to hosts that have
+   	either:
+
+   		milter-ahead-command:ip		OK
+   		milter-ahead-command:hostname	OK
+
+   	defined in the access.db. Also if you use FEATURE(`great_pause')
+   	you will require either:
+
+   		GreatPause:ip			0
+   		GreatPause:hostname 		0
+
+   	For example you should have this at a minimum:
+
+   		milter-ahead-command:127.0.0.1	OK
+   		GreetPause:127.0.0.1		0
+
+   	The extra SMTP commands are:
+
+   		milter-ahead cache-get $KEY
+   		milter-ahead cache-remove $KEY
+
+   	Where $KEY is the cache key to get or remove. Due to design
+	limitations in the libmilter API, a successful command is
+	returned as 500 5.0.0 and unsuccessful command will be 500
+	5.y.z and a textual response.
+
+   	See contrib/milter-cmd.sh for an example shell script using
+	nc(1) to provide a simple command line interface.
+
+--1.1--
+
+   +	Requires LibSnert 1.57
+
+   +	Added -H option to disable {rcpt_host} call-ahead if there
+   	is no entry in the -N table. Requested by Geoff Steer.
+
+   +	I've adding full B/W list support semantics common to all my
+   	milters. Currently this code is enabled; use -UENABLE_BW_LIST_SUPPORT
+   	to disable it.
+
+   !	The fallback HELO string was "127.0.0.1", but is now "[127.0.0.1]"
+   	which is the proper RFC compliant (commonly accepted) form.
+
+  !!	Fixed bug in MX list pruning code that could cause the milter
+   	to crash.
+
+   +	Added -i option to try the implicit MX of {rcpt_host} when no
+	other MX answers. Used in special cases where for example
+	departmental subdomain MXes point to gateway MX and rely on the
+	implicit MX rule with an A record to route the mail internally.
+	Requested by Panagiotis Christias.
+
+   !	Changed code that finds this host's MX preference to match
+   	against the interface's {if_addr} instead of {if_name}, just
+   	in case interface name is different from the MX name.
+
+   !	Have disabled the pruning of blacklisted MX hosts just prior to
+   	the call-ahead. Its my feeling that this "feature" is redundant,
+   	overkill, not utilised, and just a waste of CPU. To enable, use
+   	the compile time flag -DENABLE_PRUNE_BLACKLIST_MX. This code
+   	will eventually be removed unless strong arguments to keep it
+   	are made.
+
+   +	Added -C option to provide a negative response cache TTL. The -c
+	option now becomes the positive response cache TTL. Requested by
+	Panagiotis Christias.
+
+   +	Added call to cacheGarbadgeCollect() in filterClose(), which
+	went walk-about. Reported by Panagiotis Christias.
+
+   !	cacheGarbageCollect() simplified to use the milter connection
+	ID for the GC frequency counter. This removes the need for a
+	separate variable and only applies the mutex lock when an
+	actual GC should be done. Based on milter-sender 1.7 changes.
+
+--1.0--
+
+   +	Requires LibSnert 1.56
+
+   !	Changed install.sh.in to create /var/run/mitler/ directory
+   	owned by milter:milter and change the default PID_FILE and
+   	SOCKET_FILE paths. This provides better privelage/security
+   	separation since the milters run as milter:milter.
+
+   !	Switched to using Socket2 API with IPv6 support.
+
+--0.10--
+
+   +	Requires LibSnert 1.45+
+
+   +	Add -N option to permit domain/next-hop-host lookups from a
+   	Berkeley DB file (use makemap(1) to create it). Requested by
+   	Chris Wilson.
+
+   	If no mapping is found, then use the value of {rcpt_host}. In
+	some instances -n option and mailertable cannot be used
+	because all mail passes through an intermediate filtering
+	server or appliance that has no knowledge of the recipients
+	when there is more than one internal mail store.
+
+   	Consider:
+
+   		MX gateway -> Anti-Virus appliance -> POP domain1.com
+   						   -> POP domain2.com
+   						   -> ...
+
+	The anti-virus appliance is a closed 3rd party service or
+	system that has no knowledge of the valid recipient email
+	addresses. In such cases you would like to jump over the
+	appliance in order to query the final destination host.
+
+	The -N option provides an alternate mailertable like database,
+	since the sendmail mailertable may be disabled or used to
+	direct mail to an intermediate filtering machine.
+
+   +	Added -m option to enable MX lookups of {rcpt_host} or -N
+   	entries.
+
+   +	Added -M which accepts a comma separated word list of reserved
+   	IP address categories to discard when performing MX lookups.
+
+   !	Remove redundant line buffer size check in getSmtpResponse().
+
+--0.9--
+
+   *	A huge thank you to Stephen K Swaney for a DVD set from the
+   	wishlist.
+
+   +	Requires LibSnert 1.41
+
+   !	Fixed configure.in script to better handle Berkeley DB library
+   	and header searches. All these cases should now work.
+
+   		./configure
+   		./configure --with-db
+   		./configure --with-db=/usr/local/BerkeleyDB-4.2
+   		./configure --without-db
+
+   +	Added -F option to replace the MAIL FROM:<> line with MAIL
+   	FROM:<sender> when performing the call-ahead. Requested by
+   	Joe Pruett. Note if the server being called ahead performs
+   	any call-back or call-ahead tests themselves, then this
+   	option may have negative undefined results.
+
+   +	Added -R option to disable the %-hack for routed addresses.
+	This is roughly equivalent to the following Sendmail rule:
+
+	    SLocal_check_rcpt
+	    R$* % $* @ $+	$#error $@ 5.7.1 $: "550 routed address relaying denied"
+
+   !	Fixed time stamp variables to use the time_t instead of
+	assuming a long.
+
+   !	filterRcpt(): When the -n option is used, ignore the test
+   	that generates the "is not a defined route, skipping" message.
+   	Reported by Andreas Thienemann.
+
+   !	Fixed the start-up script to unalias shell function names
+	before defining the function. Reported by Francisco of
+	Blackant dot Net.
+
+   !	Encapsulated announce/pass/fail output the startup-script to
+	support different OS favours; some like pretty output, some
+	like it simple.
+
+   -	configure.in: Removed gcc option -fvolatile, which is no longer
+   	supported in as of gcc 3.4.
+
+   !	Modified the behaviour of the -b option. When set and the
+	primary MX is unreachable or the primary is reachable, but
+	returning a 421 server busy or 554 no service welcome message,
+	then accept the message.
+
+   +	Added -B option. Suggestion from Erik Hensema. When the
+	primary MX is reachable and accepting messages, then reject
+	the mail. This does not conform with RFC 974 section
+	"Interpreting the List of MX RRs", paragraph 7, sentence 2 and
+	3, which only requires mail clients to attempt delivery to the
+	primary first, before trying other MXes. This option
+	essentially demands that a client only deliver to the primary
+	MX when its available.
+
+   !	Synchronisation several error responses with similar tests in
+   	milter-sender.
+
+   +	The milter now starts as a background process and can kill a
+	previous instance of itself using the -x option. The -X option
+	is undocumented, but starts the application as a foreground
+	process for the purpose of debugging.
+
+   +	Added support for a /etc/mail/milter-name.cf file that can
+   	contain command-line options and an optional socket argument.
+
+   !	The socket argument is now optional.
+
+   !	The above three changes allow for a simplified startup script
+	template for use by all my milters.
+
+   !	When calling ahead to the next machine, the RCPT address as
+	given should be used and not parsed for sendmail's plus detail
+	support. Reported by Kevin Spicer.
+
+  !!	Updated LICENSE.TXT.
+
+--0.8--
+
+   +	Requires LibSnert 1.40
+
+   !	Renamed DataInitFromBytes() -> DataInitWithBytes() to remain
+	consistent with my naming/action conventions. A *FromType is a
+	copy from source and a *WithType is an assignment and/or
+	passing of responsiblity of source.
+
+--0.7--
+
+   +	Requires LibSnert 1.39
+
+   +	Added -z option to select cache type and file name, replacing
+	compile time options.
+
+   !	Fixed FreeBSD cache problem with smfSetProcessOwner() before
+   	any files (specifically the cache) are opened.
+
+   !	fitlerRcpt() now checks if the macro returned for {if_name}
+   	is NULL and tries alternatives. This might happen if
+   	confMILTER_MACROS_CONNECT was redefined and the {if_name}
+   	left out. Reported by Robert Waldner.
+
+   !	Fixed the configuration file to recognise OpenBSD. Reported by
+	Francisco of Blackant dot Net.
+
+   !	Fixed the start-up script to unalias shell function names
+	before defining the function. Reported by Francisco of
+	Blackant dot Net.
+
+--0.6--
+
+   +	Requires LibSnert 1.38
+
+   +	Bumped version to clearly indicate a new version after some
+	people got hold of pre-release work in progress.
+
+--0.5--
+
+   +	Requires LibSnert 1.37
+
+   +	Add VERSION.TXT to configuration for use by sendmail.shtml.
+
+   !	Fix makefile ownership target to assert correct state directory
+   	permissions.
+
+
+--0.4--
+
+   +	Requires LibSnert 1.36 for major smdb() update to solve threading
+   	issues and a possible memory corruption problem
+
+   +	Added contrib/milter-lives.sh cron script check that my
+	milters remain running.
+
+   +	configure.in: add --enable-startup-dir and better handling of
+	defaults for different platforms.
+
+   !	configure.in: changed handling of --localstatedir defaults for
+	different platforms.
+
+   !	Fix install.sh to assert the file permissions of the milter in
+   	sbin.
+
+   !	The hostname given to the HELO command for the call-ahead is
+	now the value of the Sendmail $j macro.
+
+   !	The existing -t option has been renamed to -T to make way for
+	the new -t option. The new -t option is the sendmail/milter
+	I/O timeout and -T is the milter/spamd I/O timeout.
+
+   !	vSetReply() not checks for an MI_FAILURE from smfi_setreply().
+
+   !	Fix memory leak from filterRcpt() not released in
+  	filterClose().
+
+   +	Set working directory to the state directory, where is can
+	write a core file in the event of crash.
+
+   !	nullWorkSpace() now takes a `where' string to report in what
+	hook it failed.
+
+   +	Add call-ahead cache support and -c option.
+
+   +	Add -n option to always force the call-ahead to a specific host.
+   	Requested by Claudio Eichenberger.
+
+   !	Fix documentation concerning mailertable setup.
+
+   !	Replaced some commom code shared by all my milters. See libsnert
+   	Sendmail Filter API (smf).
+
+   !	Standardised the -v option across all my milters. Also support
+   	textual bit names.
+
+   ! 	Modified license.
+
+
+--0.3--
+
+   +	Added -b option. If milter-ahead is being run on a secondary
+	backup MX (vs. a boarder gateway), then in the event that the
+	primary fails to answer connections, the mail should be
+	accepted. Suggested by Alexander Bochmann.
+
+   +	Add named socket unlink code to atExitCleanUp() to work around the
+   	fact the libmilter doesn't do it itself.
+
+   !	filterRcpt() fix stripping [ and ] from {rcpt_host} that may
+   	be set in mailertable.
+
+   +	milter-date.sh.in: add 2nd brute-force kill attempt to correspond
+   	with milter-sender and milter-spamc scripts.
+
+   +	Saves a pid file in /var/lib/milter-ahead/pid. Yes, I know I
+	should save it in /var/run/milter-ahead.pid, but that assumes
+	a process that runs as root all the time, since /var/run
+	typically needs root to access and there is no guarantee that
+	the milter starts as root. milter-ahead changes process
+	ownership early in the process and I choose not to save the
+	pid until just after all the setup code and before the version
+	log lines.
+
+   +	install.sh.in: The milter-*.mc file is copied to /etc/mail.
+
+   +	Add compile-time option to change the default SMTP port for special
+   	setups. Requested by Ron DiVecchia.
+
+   *	As someone pointed out to me, my milters could be simply specified
+   	within your sendmail.mc file with:
+
+		include(`milter-sender.mc')dnl
+		include(`milter-date.mc')dnl
+		include(`milter-7bit.mc')dnl
+		include(`milter-spamc.mc')dnl
+
+	Assumes that *.mc are found in /etc/mail along side the sendmail.mc
+	script. If you use milter-sender, then you don't need milter-ahead,
+	otherwise, milter-ahead comes before milter-date.
+
+	The milters are ordered in this way because:
+
+		milter-sender and milter-ahead work on everything BEFORE
+		the DATA (message content) command.
+
+		milter-date, milter-7bit, milter-spamc work with the message
+		content AFTER the DATA command '.'
+
+		milter-date looks only at message headers.
+
+		milter-7bit looks at message headers and MIME parts over the
+		entire message body.
+
+		milter-spamc looks at message headers and only the first 64K
+		of the message body. Scanning for spam is considered to be
+		an intensive task that I think it shoulc come last. Like wise
+		for anti-virus filters.
+
+--0.2--
+
+   +	Added index.shtml documentation.
+
+   !	Fixed fetch and display of queue-id in filterRcpt() and filterClose().
+
+--0.1--
+
+   +	Initial private release.

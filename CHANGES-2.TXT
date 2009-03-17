@@ -1,0 +1,36 @@
+--2.0--
+
+   +	Requires LibSnert 1.63
+
+  !!	The cache code has been completely replaced, including many of
+  	the options:
+  		
+  		Old				New
+  		----------------------------------------------------
+  		cache-file		->	cache-path
+  		cache-type		
+  		cache-gc-frequency	->	cache-gc-interval
+  						cache-multicast-ip
+  						cache-multicast-port
+  						cache-secret
+  						cache-unicast-domain
+  						cache-unicast-port
+  						
+  	The cache is now an SQLite3 database, which allows the
+	sqlite3(1) utility or similar to be used to manipulate
+	individual records. It also allows for improved garbage
+	collection. The garbage collection is now handled by a
+	separate timer thread, which allows for predictable and
+	regular behaviour.
+  	
+  	The most significant feature change is the introduction of the
+	multicast / unicast cache, which provides a fast, simple, and
+	efficient means to share cache updates across multiple
+	machines on the same network segment. The multicast cache uses
+	a broadcast-and-correct model. It support IPv4 and IPv6.
+	
+	When multicast caching is not possible a unicast variant is
+	possible where cache updates are sent to the MX list of the
+	specified domain.
+
+
