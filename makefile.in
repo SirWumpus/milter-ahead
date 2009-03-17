@@ -32,6 +32,7 @@ PROGRAM		= @milter_executable@
 A = .@LIBEXT@
 O = .@OBJEXT@
 E = @EXEEXT@
+.SUFFIXES : .h .c .i $O $E
 
 #
 # Paths for supporting headers and libraries.
@@ -62,6 +63,11 @@ MILTER_BUILD=`cat BUILD_ID.TXT`
 
 #######################################################################
 
+.c.i:
+	${CC} -E ${CFLAGS} $*.c >$*.i
+
+.MAIN : build
+
 build : ${MILTER}
 	@echo
 	@echo '***************************************************************'
@@ -77,7 +83,7 @@ clean:
 	@echo '***************************************************************'
 	@echo
 
-distclean: 
+distclean:
 	@echo '---------------------------------------------------------------'
 	-rm -f ${MILTER}.md5 *.o *.obj *.tds *.log *.exe *.core
 	-rm -f sample.mc startup.sh install.sh config.h makefile
@@ -105,15 +111,15 @@ stop:
 	-./${MILTER} -quit
 
 restart:
-	-./${MILTER} -restart	
-	
+	-./${MILTER} -restart
+
 install: ${MILTER} install.sh
 	sh install.sh
 
 install.sh: install.sh.in config.status
 
 config.status: configure
-	./configure	
+	./configure
 
 configure: aclocal.m4 configure.in
 	${AUTOCONF} -f

@@ -1171,7 +1171,7 @@ cacheRemove(workspace data, char *name)
 }
 
 static sfsistat
-filterUnknown(SMFICTX * ctx, char *command)
+filterUnknown(SMFICTX * ctx, const char *command)
 {
 	char *word;
 	sfsistat rc;
