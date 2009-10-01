@@ -15,6 +15,21 @@ is no set schedule for releases.
    +	Add support for :port specifier with host name or IP in RHS
    	of call-ahead-db records. Requested by Mark Hellegers.
 
+--1.11--
+
+   !	filterRcpt: Fixed bug as a result of changes in libsnert 1.72.5
+	concerning the separation of IO errors from not-found answers in
+	smdb API (made for BarricadeMX use of socketmaps).
+
+	The call-ahead-db option uses the smdb API. When disabled, the
+	call to smdbAccessDomain used to returned SMDB_ACCESS_NOT_FOUND,
+	but now returns SMDB_ACCESS_TEMPFAIL with a "TEMPFAIL" string on
+	error.
+
+	call-ahead-db values are similar to mailertable, thus smdbAccess
+	routinues should always return SMDB_ACCESS_UNKNOWN and a string;
+	anything else is invalid for call-ahead-db and can be ignored.
+
 --1.10--
 
    !	Postfix milter support does not provide many of the sendmail
@@ -31,6 +46,8 @@ is no set schedule for releases.
    !	Allow +ignore-rcpt-host in combination with +mx-lookup in order
 	to skip falling back on the {rcpt_host} value when no MX answers.
 	Requested by Sebastian Wiesinger.
+
+   !	sample.mc.in: Removed from define(`_FFR_MILTER', `1')dnl
 
 --1.9--
 

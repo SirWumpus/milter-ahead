@@ -1,7 +1,7 @@
 /*
  * milter-ahead.c
  *
- * Copyright 2004, 2006 by Anthony Howe. All rights reserved.
+ * Copyright 2004, 2009 by Anthony Howe. All rights reserved.
  *
  * The following should be added to the sendmail.mc file:
  *
@@ -85,8 +85,8 @@
 #endif
 #include <signal.h>
 
-#if LIBSNERT_MAJOR < 1 || LIBSNERT_MINOR < 64
-# error "LibSnert/1.64.904 or better is required"
+#if LIBSNERT_MAJOR < 1 || LIBSNERT_MINOR < 72
+# error "LibSnert/1.72.11 or better is required"
 #endif
 
 # define MILTER_STRING	MILTER_NAME"/"MILTER_VERSION
@@ -804,7 +804,11 @@ filterRcpt(SMFICTX *ctx, char **args)
 
 	/* BY-PASS if the MX needs to be looked up. */
 	if (*optCallAheadHost.string == '\0') {
-		if (smdbAccessDomain(callAheadDb, NULL, data->work.rcpt->domain.string, NULL, &value) != SMDB_ACCESS_NOT_FOUND) {
+		/* call-ahead-db values are similar to mailertable, thus smdbAccess
+		 * routinues should always return SMDB_ACCESS_UNKNOWN and a string;
+		 * anything else is invalid for call-ahead-db and can be ignored.
+		 */
+		if (smdbAccessDomain(callAheadDb, NULL, data->work.rcpt->domain.string, NULL, &value) == SMDB_ACCESS_UNKNOWN) {
 			char *mailer;
 
 			/* We now support the use of a mailertable formatted
