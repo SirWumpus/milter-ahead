@@ -279,8 +279,8 @@ else
 		unset ac_cv_search_dbopen
 
 		BDB_BASE_DIRS="$with_db /opt/csw/bdb4 /opt /usr/local /usr"
-		BDB_VERSIONS='4.6 4.5 4.4 4.3 4.2 4.1 4.0 3.3 3.2'
-		BDB_NAMES='db-4.6 db4.6 db46 db-4.5 db4.5 db45 db-4.4 db4.4 db44 db-4.3 db4.3 db43 db-4.2 db4.2 db42 db-4.1 db4.1 db41 db-4 db4 db-3.3 db3.3 db33 db-3.2 db3.2 db32 db-3 db3 db'
+		BDB_VERSIONS='4.7 4.6 4.5 4.4 4.3 4.2 4.1 4.0 3.3 3.2'
+		BDB_NAMES='db-4.7 db4.7 db47 db-4.6 db4.6 db46 db-4.5 db4.5 db45 db-4.4 db4.4 db44 db-4.3 db4.3 db43 db-4.2 db4.2 db42 db-4.1 db4.1 db41 db-4 db4 db-3.3 db3.3 db33 db-3.2 db3.2 db32 db-3 db3 db'
 
 		# Find short list of directories to try.
 		for d in $BDB_BASE_DIRS ; do
@@ -394,9 +394,14 @@ main(int argc, char **argv)
 
 		if test ${isDebian:-no} = 'yes' -a ${bdb_found:-no} = 'no'; then
 			# Fetch headers matching library.
-			apt-get install -y libdb${bdb_version}-dev
-			count=`expr $count + 1`
-			echo 'retrying after development package update...'
+			AC_MSG_NOTICE([getting package libdb${bdb_version}-dev...])
+			AS_IF([apt-get install -y libdb${bdb_version}-dev],[
+				AC_MSG_NOTICE([getting package libdb${bdb_version}-dev... done])
+				count=`expr $count + 1`
+				AC_MSG_NOTICE([retrying after development package install...])
+			],[
+				AC_MSG_NOTICE([getting package libdb${bdb_version}-dev... FAILED])
+			])
 		fi
 
 		count=`expr $count - 1`
@@ -1010,6 +1015,7 @@ dnl #endif
 	AC_CHECK_FUNCS([chdir getcwd mkdir rmdir closedir opendir readdir])
 	AC_CHECK_FUNCS([chmod chown chroot fchmod stat fstat link rename unlink umask utime])
 	AC_CHECK_FUNCS([close creat dup dup2 ftruncate chsize truncate lseek open pipe read write])
+	AC_CHECK_FUNCS([isatty getdtablesize])
 	AC_FUNC_CHOWN
 ])
 
