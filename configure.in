@@ -100,7 +100,7 @@ if test -f '../lib/version.sh' ; then
 	AC_SUBST(LDFLAGS_PTHREAD)
 	AC_SUBST(HAVE_LIB_PTHREAD)
 
-	if test ${HAVE_LIB_PTHREAD:-no} = 'no' -a ${CFLAGS_PTHREAD:-no} = 'no' ; then
+	if test "${HAVE_LIB_PTHREAD:-no}" = 'no' -a "${CFLAGS_PTHREAD:-no}" = 'no' ; then
 		echo
 		echo '***************************************************************'
 		echo "       Sendmail milters require POSIX thread support."
