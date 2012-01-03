@@ -84,8 +84,8 @@
 #endif
 #include <signal.h>
 
-#if LIBSNERT_MAJOR < 1 || LIBSNERT_MINOR < 74
-# error "LibSnert/1.74.1 or better is required"
+#if LIBSNERT_MAJOR < 1 || LIBSNERT_MINOR < 75
+# error "LibSnert 1.75.8 or better is required"
 #endif
 
 # define MILTER_STRING	MILTER_NAME"/"MILTER_VERSION
@@ -811,8 +811,8 @@ mxConnect(workspace data, char *domain)
 	}
 
 	/* Did we get a result we can use and is it a valid domain? */
- 	if (list->rcode != PDQ_RCODE_OK) {
-		syslog(LOG_ERR, TAG_FORMAT "%s: error %s", TAG_ARGS, domain, pdqRcodeName(list->rcode));
+ 	if (((PDQ_QUERY *)list)->rcode != PDQ_RCODE_OK) {
+		syslog(LOG_ERR, TAG_FORMAT "%s: error %s", TAG_ARGS, domain, pdqRcodeName(((PDQ_QUERY *)list)->rcode));
 		goto error1;
 	}
 
@@ -838,7 +838,8 @@ mxConnect(workspace data, char *domain)
 	/* Try all MX of a lower preference until one answers. */
 	socket = NULL;
 	for (mx = (PDQ_MX *) list; mx != NULL; mx = (PDQ_MX *) mx->rr.next) {
-		if (mx->rr.type != PDQ_TYPE_MX || preference <= mx->preference)
+		if (list->section == PDQ_SECTION_QUERY
+		|| mx->rr.type != PDQ_TYPE_MX || preference <= mx->preference)
 			continue;
 
 		if ((socket = socketConnect(mx->host.string.value, SMTP_PORT, optSmtpTimeout.value)) != NULL) {
