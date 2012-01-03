@@ -2,13 +2,13 @@
 #	Thus it begins...
 #######################################################################
 
-AC_INIT(milter-ahead, 1.11, [Anthony Howe <achowe@snert.com>])
+AC_INIT(milter-ahead, 1.12, [Anthony Howe <achowe@snert.com>])
 
 dnl The autoconf version I learned to deal with.
 AC_PREREQ(2.59)
 
 dnl Yes I wrote this mess.
-SNERT_INIT(MILTER, [Copyright 2004, 2009 by Anthony Howe. All rights reserved.])
+SNERT_INIT(MILTER, [Copyright 2004, 2010 by Anthony Howe. All rights reserved.])
 
 AC_SUBST(snert_milter_t_equate, 'C:1m;S:1m;R:6m;E:2m')
 
@@ -119,6 +119,8 @@ fi
 #######################################################################
 #	Generate output.
 #######################################################################
+
+SNERT_FINI
 
 echo
 echo "Generating files..."

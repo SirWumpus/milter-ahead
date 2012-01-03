@@ -15,6 +15,36 @@ is no set schedule for releases.
    +	Add support for :port specifier with host name or IP in RHS
    	of call-ahead-db records. Requested by Mark Hellegers.
 
+--1.12--
+
+   !	mxConnect: Switch to PDQ API.
+
+   !	mxConnect: Replaced socketOpenClient with socketClient so as to
+	handle multi-home hosts.
+
+   -	Disable try-implicit-mx code. PDQ MX lookup handles this
+	automatically.
+
+   !	Fix Postfix issues concerning {client_name} and {client_addr}
+   	always coming back NULL. Use smfProlog to save the client name
+   	and address supplied to filterOpen in the workspace.
+
+   +	Added -version and -info command options.
+
+   +	Add special SMTP command "STAT milter-ahead" that reports some
+   	basic process data. Can only be used from localhost for
+   	security concerns. Appears to work only with sendmail and not
+   	postfix.
+
+   +	Updated documentation concerning "combo" tag support added in
+   	libsnert.
+
+   +	Removed ENABLE_BLACKLIST macros in favour of it	always being
+	compiled in. The original argument to disable blacklisting was
+	that sendmail already had its own mechanism; however libsnert
+	milter support provides a richer syntax especially with the
+	addition of combo tags. Also it makes documentation easier.
+
 --1.11--
 
    !	filterRcpt: Fixed bug as a result of changes in libsnert 1.72.5

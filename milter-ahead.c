@@ -1,7 +1,7 @@
 /*
  * milter-ahead.c
  *
- * Copyright 2004, 2009 by Anthony Howe. All rights reserved.
+ * Copyright 2004, 2010 by Anthony Howe. All rights reserved.
  *
  * The following should be added to the sendmail.mc file:
  *
@@ -55,7 +55,6 @@
 
 #define NON_BLOCKING_READ
 #define NON_BLOCKING_WRITE
-#define ENABLE_BW_LIST_SUPPORT
 
 /***********************************************************************
  *** No configuration below this point.
@@ -85,8 +84,8 @@
 #endif
 #include <signal.h>
 
-#if LIBSNERT_MAJOR < 1 || LIBSNERT_MINOR < 72
-# error "LibSnert/1.72.11 or better is required"
+#if LIBSNERT_MAJOR < 1 || LIBSNERT_MINOR < 74
+# error "LibSnert/1.74.1 or better is required"
 #endif
 
 # define MILTER_STRING	MILTER_NAME"/"MILTER_VERSION
@@ -100,9 +99,10 @@
 #include <com/snert/lib/mail/mf.h>
 #include <com/snert/lib/mail/smf.h>
 #include <com/snert/lib/mail/smdb.h>
-#include <com/snert/lib/io/Dns.h>
+#include <com/snert/lib/net/pdq.h>
+#include <com/snert/lib/io/file.h>
 #include <com/snert/lib/io/socket2.h>
-#include <com/snert/lib/sys/Mutex.h>
+#include <com/snert/lib/sys/sysexits.h>
 #include <com/snert/lib/util/Cache.h>
 #include <com/snert/lib/util/Text.h>
 #include <com/snert/lib/util/setBitWord.h>
@@ -121,21 +121,11 @@
 #define DB_UNKNOWN		DB_HASH
 #endif
 
-#ifndef IS_IP_LAN
-#define IS_IP_LAN		(IS_IP_PRIVATE_A|IS_IP_PRIVATE_B|IS_IP_PRIVATE_C|IS_IP_LINK_LOCAL|IS_IP_SITE_LOCAL)
-#endif
-
-#ifndef IS_IP_LOCAL
-#define IS_IP_LOCAL		(IS_IP_THIS_HOST|IS_IP_LOCALHOST|IS_IP_LOOPBACK)
-#endif
-
-#ifndef IS_IP_LOCAL_OR_LAN
-#define IS_IP_LOCAL_OR_LAN	(IS_IP_LAN|IS_IP_LOCAL)
-#endif
-
 /***********************************************************************
  *** Global Variables
  ***********************************************************************/
+
+static smfInfo milter;
 
 typedef struct {
 	time_t created;
@@ -162,8 +152,6 @@ typedef struct {
 	smfWork work;
 	Socket2 *server;			/* per RCPT */
 	char line[SMTP_TEXT_LINE_LENGTH+1];	/* general purpose */
-	char client_name[SMTP_DOMAIN_LENGTH+1];			/* per connection */
-	char client_addr[IPV6_TAG_LENGTH+IPV6_STRING_LENGTH];	/* per connection */
 } *workspace;
 
 static struct bitword isIpBits[] = {
@@ -257,7 +245,19 @@ static Option optMxReject		= { "mx-reject",		"all",		usage_reserved_ip };
 static Option optPrimaryUpReject	= { "primary-up-reject",	"-",		usage_primary_up_reject };
 static Option optRelayMailFrom		= { "relay-mail-from",		"-",		"Call-ahead using the original MAIL FROM: instead of the null address." };
 static Option optSmtpTimeout		= { "smtp-timeout",		"120",		"SMTP socket timeout used for call-ahead." };
+
+#ifdef ENABLE_TRY_IMPLICIT_MX
 static Option optTryImplicitMx		= { "try-implicit-mx",		"-",		"Try the implicit MX for {rcpt_host} if no other MX answers." };
+#endif
+
+Option opt_version		= { "version",			NULL,		"Show version and copyright." };
+
+static const char usage_info[] =
+  "Write the configuration and compile time options to standard output\n"
+"# and exit.\n"
+"#"
+;
+Option opt_info			= { "info", 			NULL,		usage_info };
 
 static Option *optTable[] = {
 	&optIntro,
@@ -270,6 +270,7 @@ static Option *optTable[] = {
 	&optCallAheadDb,
 	&optCallAheadHost,
 	&optIgnoreRcptHost,
+	&opt_info,
 	&optIsBlindMx,
 	&optMaxFailures,
 	&optMxLookup,
@@ -277,9 +278,108 @@ static Option *optTable[] = {
 	&optPrimaryUpReject,
 	&optRelayMailFrom,
 	&optSmtpTimeout,
+#ifdef ENABLE_TRY_IMPLICIT_MX
 	&optTryImplicitMx,
+#endif
+	&opt_version,
 	NULL
 };
+
+/***********************************************************************
+ *** Stats
+ ***********************************************************************/
+
+typedef struct {
+	const char *name;
+	unsigned long count;
+} Stat;
+
+static pthread_mutex_t stat_mutex;
+
+#define STAT_DECLARE(name)	\
+static const char stat_name_##name[] = #name; \
+static Stat stat_##name = { stat_name_##name }
+
+#define STAT_POINTER(name)	&stat_##name
+
+STAT_DECLARE(start_time);
+STAT_DECLARE(run_time);
+STAT_DECLARE(connect_active);
+STAT_DECLARE(connect_total);
+STAT_DECLARE(connect_error);
+STAT_DECLARE(transactions);
+STAT_DECLARE(access_bl);
+STAT_DECLARE(access_wl);
+STAT_DECLARE(access_other);
+STAT_DECLARE(rcpts_total);
+STAT_DECLARE(rcpts_accept);
+STAT_DECLARE(rcpts_reject);
+
+#define SMF_MAX_MULTILINE_REPLY		32
+
+static Stat *stat_table[SMF_MAX_MULTILINE_REPLY] = {
+	&stat_start_time,
+	&stat_run_time,
+	&stat_connect_active,
+	&stat_connect_total,
+	&stat_connect_error,
+	&stat_access_bl,
+	&stat_access_wl,
+	&stat_access_other,
+	&stat_transactions,
+	&stat_rcpts_total,
+	&stat_rcpts_accept,
+	&stat_rcpts_reject,
+	NULL
+};
+
+void
+statInit(void)
+{
+	(void) pthread_mutex_init(&stat_mutex, NULL);
+	(void) time((time_t *) &stat_start_time.count);
+}
+
+void
+statFini(void)
+{
+	(void) pthreadMutexDestroy(&stat_mutex);
+}
+
+void
+statGet(Stat *stat, Stat *out)
+{
+	if (!pthread_mutex_lock(&stat_mutex)) {
+		*out = *stat;
+		(void) pthread_mutex_unlock(&stat_mutex);
+	} else {
+		(void) memset(out, 0, sizeof (*out));
+	}
+}
+
+void
+statSetValue(Stat *stat, unsigned long value)
+{
+	if (!pthread_mutex_lock(&stat_mutex)) {
+		stat->count = value;
+		(void) pthread_mutex_unlock(&stat_mutex);
+	}
+}
+
+void
+statAddValue(Stat *stat, long value)
+{
+	if (!pthread_mutex_lock(&stat_mutex)) {
+		stat->count += value;
+		(void) pthread_mutex_unlock(&stat_mutex);
+	}
+}
+
+void
+statCount(Stat *stat)
+{
+	statAddValue(stat, 1);
+}
 
 /***********************************************************************
  *** Support routines.
@@ -542,6 +642,7 @@ cacheGarbageCollect(workspace data)
 static sfsistat
 filterOpen(SMFICTX *ctx, char *client_name, _SOCK_ADDR *raw_client_addr)
 {
+	int access;
 	workspace data;
 
 	if (raw_client_addr == NULL) {
@@ -561,45 +662,60 @@ filterOpen(SMFICTX *ctx, char *client_name, _SOCK_ADDR *raw_client_addr)
 	if ((data = calloc(1, sizeof *data)) == NULL)
 		goto error0;
 
-	data->work.ctx = ctx;
-	data->work.qid = smfNoQueue;
-	data->work.cid = smfOpenProlog(ctx, client_name, raw_client_addr, data->client_addr, sizeof (data->client_addr));
+	smfProlog(&data->work, ctx, client_name, raw_client_addr);
+	data->work.info = &milter;
 
-	smfLog(SMF_LOG_TRACE, TAG_FORMAT "filterOpen(%lx, '%s', [%s])", TAG_ARGS, (long) ctx, client_name, data->client_addr);
+	smfLog(SMF_LOG_TRACE, TAG_FORMAT "filterOpen(%lx, '%s', [%s])", TAG_ARGS, (long) ctx, data->work.client_name, data->work.client_addr);
 
 	if (smfi_setpriv(ctx, (void *) data) == MI_FAILURE) {
 		syslog(LOG_ERR, TAG_FORMAT "failed to save workspace", TAG_ARGS);
 		goto error1;
 	}
 
-#ifdef ENABLE_BW_LIST_SUPPORT
-	switch (smfAccessHost(&data->work, MILTER_NAME "-connect:", client_name, data->client_addr, SMDB_ACCESS_OK)) {
-	case SMDB_ACCESS_OK:
-		return SMFIS_ACCEPT;
-	case SMDB_ACCESS_ERROR:
-		return SMFIS_REJECT;
+	access = smfAccessHost(&data->work, MILTER_NAME "-connect:", data->work.client_name, data->work.client_addr, SMDB_ACCESS_OK);
+
+	switch (access) {
 	case SMDB_ACCESS_REJECT:
-		/* Report this mail error ourselves, because snedmail/milter API
+		/* Report this mail error ourselves, because sendmail/milter API
 		 * fails to report xxfi_connect handler rejections.
 		 */
-		smfLog(SMF_LOG_ERROR, TAG_FORMAT "connection %s [%s] blocked", TAG_ARGS, client_name, data->client_addr);
-		return smfReply(&data->work, 550, "5.7.1", "connection %s [%s] blocked", client_name, data->client_addr);
-	}
-#endif
+		statCount(&stat_access_bl);
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "connection %s [%s] blocked", TAG_ARGS, client_name, data->work.client_addr);
+		return smfReply(&data->work, 550, "5.7.1", "connection %s [%s] blocked", client_name, data->work.client_addr);
 
-	TextCopy(data->client_name, sizeof (data->client_name), client_name);
+	case SMDB_ACCESS_ERROR:
+		statCount(&stat_access_other);
+		return SMFIS_REJECT;
+
+	case SMDB_ACCESS_OK:
+		statCount(&stat_access_wl);
+		statAddValue(&stat_connect_active, 1);
+		smfLog(SMF_LOG_TRACE, TAG_FORMAT "client %s [%s] white listed", TAG_ARGS, client_name, data->work.client_addr);
+		data->work.skipConnection = 1;
+
+		/* Don't use SMFIS_ACCEPT, otherwise we can't do STAT
+		 * from localhost.
+		 */
+		return SMFIS_CONTINUE;
+	}
+
+	statAddValue(&stat_connect_active, 1);
 
 	return SMFIS_CONTINUE;
 error1:
 	free(data);
 error0:
+	statCount(&stat_connect_error);
+
 	return SMFIS_ACCEPT;
 }
 
 static sfsistat
 filterMail(SMFICTX *ctx, char **args)
 {
+	int access;
 	workspace data;
+	char *auth_authen;
 
 	if ((data = (workspace) smfi_getpriv(ctx)) == NULL)
 		return smfNullWorkspaceError("filterMail");
@@ -613,124 +729,141 @@ filterMail(SMFICTX *ctx, char **args)
 
 	smfLog(SMF_LOG_TRACE, TAG_FORMAT "filterMail(%lx, %lx) MAIL='%s'", TAG_ARGS, (long) ctx, (long) args, args[0]);
 
-#ifdef ENABLE_BW_LIST_SUPPORT
-{
-	int access;
-	char *auth_authen;
-
-	auth_authen = smfi_getsymval(ctx, smMacro_auth_authen);
-	access = smfAccessAuth(&data->work, MILTER_NAME "-auth:", auth_authen, args[0], NULL, NULL);
-
-	switch (access) {
-	case SMDB_ACCESS_ERROR:
-		return SMFIS_REJECT;
-	case SMDB_ACCESS_REJECT:
-		return smfReply(&data->work, 550, "5.7.1", "sender blocked");
-	case SMDB_ACCESS_OK:
-		syslog(LOG_INFO, TAG_FORMAT "sender %s authenticated, accept", TAG_ARGS, args[0]);
-		return SMFIS_ACCEPT;
-	}
-
 	access = smfAccessMail(&data->work, MILTER_NAME "-from:", args[0], SMDB_ACCESS_UNKNOWN);
 
 	switch (access) {
-	case SMDB_ACCESS_OK:
-		return SMFIS_ACCEPT;
-	case SMDB_ACCESS_ERROR:
-		return SMFIS_REJECT;
 	case SMDB_ACCESS_REJECT:
+		statCount(&stat_access_bl);
 		return smfReply(&data->work, 550, "5.7.1", "sender blocked");
+
+	case SMDB_ACCESS_OK:
+		statCount(&stat_access_wl);
+		smfLog(SMF_LOG_TRACE, TAG_FORMAT "sender %s white listed", TAG_ARGS, args[0]);
+		data->work.skipMessage = 1;
+		return SMFIS_ACCEPT;
+
+	/* smfAccessMail failure cases. */
+	case SMDB_ACCESS_TEMPFAIL:
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "sender %s temp.failed", TAG_ARGS, args[0]);
+		statCount(&stat_access_other);
+		return SMFIS_TEMPFAIL;
+
+	case SMDB_ACCESS_ERROR:
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "sender %s unknown error", TAG_ARGS, args[0]);
+		statCount(&stat_access_other);
+		return SMFIS_REJECT;
 	}
-}
-#else
-{
-	const char *error;
-        if ((error = parsePath(args[0], smfFlags, 1, &data->work.mail)) != NULL)
-                return smfReply(&data->work, 553, NULL, error);
-}
-#endif
+
+	access = smfAccessAuth(&data->work, MILTER_NAME "-auth:", auth_authen, args[0], NULL, NULL);
+
+	switch (access) {
+	case SMDB_ACCESS_REJECT:
+		statCount(&stat_access_bl);
+		return smfReply(&data->work, 550, "5.7.1", "sender blocked");
+
+	case SMDB_ACCESS_OK:
+		statCount(&stat_access_wl);
+		smfLog(SMF_LOG_TRACE, TAG_FORMAT "authenticated id <%s> white listed", TAG_ARGS, auth_authen);
+		data->work.skipMessage = 1;
+		return SMFIS_ACCEPT;
+
+	/* smfAccessAuth failure cases. */
+	case SMDB_ACCESS_TEMPFAIL:
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "authenticated id <%s> temp.failed", TAG_ARGS, auth_authen);
+		statCount(&stat_access_other);
+		return SMFIS_TEMPFAIL;
+
+	case SMDB_ACCESS_ERROR:
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "authenticated id <%s> unknown error", TAG_ARGS, auth_authen);
+		statCount(&stat_access_other);
+		return SMFIS_REJECT;
+	}
+
+	statCount(&stat_transactions);
 
 	return SMFIS_CONTINUE;
 }
 
 static int
-mxConnect(workspace data, char *rcpt_host)
+mxConnect(workspace data, char *domain)
 {
-	long i;
-	DnsEntry *mx;
-	Vector mxlist;
+	PDQ_MX *mx;
+	PDQ_rr *list;
+	Socket2 *socket;
 	int rc, preference;
-	const char *if_addr, *error;
 
 	rc = -1;
-	preference = 65535;
+	data->server = NULL;
 
-	if ((if_addr = smfi_getsymval(data->work.ctx, smMacro_if_addr)) == NULL)
-		if_addr = smfOptInterfaceIp.string;
+	smfLog(SMF_LOG_DIALOG, TAG_FORMAT "mxConnect(%lx, '%s')", TAG_ARGS, (long) data, domain);
 
-	smfLog(SMF_LOG_DIALOG, TAG_FORMAT "mxConnect(%lx, '%s') if_addr=%s", TAG_ARGS, (long) data, rcpt_host, if_addr);
-
-	/* Make sure the rcpt_host is not bound by square bracket, which
+	/* Make sure the domain is not bound by square bracket, which
 	 * disable MX lookups.
 	 */
-	if (*rcpt_host == '[') {
-		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "%s: square brakets disables MX lookup", TAG_ARGS, rcpt_host);
+	if (*domain == '[') {
+		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "%s: square brackets disables MX lookup", TAG_ARGS, domain);
 		goto error0;
 	}
 
-	if (DnsGet2(DNS_TYPE_MX, 1, rcpt_host, &mxlist, &error) != DNS_RCODE_OK) {
-		syslog(LOG_ERR, TAG_FORMAT "%s: %s", TAG_ARGS, rcpt_host, error);
+	if ((list = pdqFetch(PDQ_CLASS_IN, PDQ_TYPE_MX, domain, NULL)) == NULL) {
+		syslog(LOG_ERR, TAG_FORMAT "%s: MX lookup error: %s (%d)", TAG_ARGS, domain, strerror(errno), errno);
 		goto error0;
 	}
 
-	/* Find the max. possible preference value. */
-	for (i = 0; i < VectorLength(mxlist); i++) {
-		if ((mx = VectorGet(mxlist, i)) == NULL)
-			continue;
-
-		smfLog(SMF_LOG_DNS, TAG_FORMAT "review MX %s [%s]", TAG_ARGS, mx->value, mx->address_string);
-
-		/* TEST: RFC 3330 consolidates the list of special IPv4 addresses
-		 * that cannot be used for public internet. We block those that
-		 * cannot possibly be used for MX addresses on the public internet.
-		 */
-		if (mx->address_string == NULL || isReservedIPv6(mx->address, optMxReject.value)) {
-			smfLog(SMF_LOG_INFO, TAG_FORMAT "removed MX %d %s [%s]", TAG_ARGS, mx->preference, mx->value, mx->address_string);
-			VectorRemove(mxlist, i--);
-			continue;
-		}
-
-		/* Look for our IP address to find our preference value. */
-		if (TextInsensitiveCompare(mx->address_string, if_addr) == 0)
-			preference = mx->preference;
+	/* Did we get a result we can use and is it a valid domain? */
+ 	if (list->rcode != PDQ_RCODE_OK) {
+		syslog(LOG_ERR, TAG_FORMAT "%s: error %s", TAG_ARGS, domain, pdqRcodeName(list->rcode));
+		goto error1;
 	}
 
-	if (VectorLength(mxlist) <= 0)
-		smfLog(SMF_LOG_INFO, TAG_FORMAT "no acceptable MX server", TAG_ARGS);
+	if (smfLogDetail & SMF_LOG_DIALOG)
+		pdqListLog(list);
+
+	list = pdqListPrune(list, IS_IP_TEST|IS_IP_LINK_LOCAL|IS_IP_SITE_LOCAL|IS_IP_MULTICAST|IS_IP_RESERVED);
+
+	if (list == NULL) {
+		syslog(LOG_ERR, TAG_FORMAT "%s: has no acceptable MX", TAG_ARGS, domain);
+		goto error0;
+	}
+
+	/* Find preference weight of connected client. */
+	preference = 65535;
+	if ((mx = (PDQ_MX *) pdqListFindHost(list, PDQ_CLASS_IN, PDQ_TYPE_MX, data->work.client_name)) != NULL)
+		preference = mx->preference;
+
+	/* Do not ignore the implicit MX record. */
+	if (preference == 0)
+		preference = 65535;
 
 	/* Try all MX of a lower preference until one answers. */
-	for (i = 0; i < VectorLength(mxlist); i++) {
-		if ((mx = VectorGet(mxlist, i)) == NULL)
+	socket = NULL;
+	for (mx = (PDQ_MX *) list; mx != NULL; mx = (PDQ_MX *) mx->rr.next) {
+		if (mx->rr.type != PDQ_TYPE_MX || preference <= mx->preference)
 			continue;
 
-		if (preference <= mx->preference)
-			continue;
+		if ((socket = socketConnect(mx->host.string.value, SMTP_PORT, optSmtpTimeout.value)) != NULL) {
+			smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to MX %d %s", TAG_ARGS, mx->preference, mx->host.string.value);
 
-		if (socketOpenClient(mx->value, SMTP_PORT, optSmtpTimeout.value, NULL, &data->server) == 0) {
-			smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to MX %d %s", TAG_ARGS, mx->preference, mx->value);
+			fileSetCloseOnExec(socketGetFd(socket), 1);
+			socketFdSetKeepAlive(socketGetFd(socket), 1, SMTP_COMMAND_TO, 60, 3);
+			socketSetTimeout(socket, optSmtpTimeout.value);
+			(void) socketSetNonBlocking(socket, 1);
 			rc = 0;
 			break;
 		}
 	}
 
+#ifdef ENABLE_TRY_IMPLICIT_MX
 	if (rc == -1
 	&& optTryImplicitMx.value
-	&& socketOpenClient(rcpt_host, SMTP_PORT, optSmtpTimeout.value, NULL, &data->server) == 0) {
-		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to MX 0 %s", TAG_ARGS, rcpt_host);
+	&& (socket = socketConnect(domain, SMTP_PORT, optSmtpTimeout.value)) == NULL) {
+		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to MX 0 %s", TAG_ARGS, domain);
 		rc = 0;
 	}
-/* error1: */
-	VectorDestroy(mxlist);
+#endif
+	data->server = socket;
+error1:
+	pdqFree(list);
 error0:
 	return rc;
 }
@@ -738,10 +871,10 @@ error0:
 static sfsistat
 filterRcpt(SMFICTX *ctx, char **args)
 {
-	int status;
 	sfsistat rc;
 	workspace data;
 	CacheEntry entry;
+	int status, access;
 	char *auth_authen, *rcpt_addr, *rcpt_host, *rcpt_mailer, *helo, *value;
 
 	value = NULL;
@@ -752,6 +885,7 @@ filterRcpt(SMFICTX *ctx, char **args)
 
 	free(data->work.rcpt);
 	data->work.rcpt = NULL;
+	statCount(&stat_rcpts_total);
 
 	if ((rcpt_addr = smfi_getsymval(ctx, "{rcpt_addr}")) == NULL || *rcpt_addr == '\0')
 		rcpt_addr = args[0];
@@ -777,28 +911,31 @@ filterRcpt(SMFICTX *ctx, char **args)
 		goto error0;
 	}
 
-#ifdef ENABLE_BW_LIST_SUPPORT
-	switch (smfAccessRcpt(&data->work, MILTER_NAME "-to:", args[0])) {
-	case SMDB_ACCESS_OK:
-		return SMFIS_ACCEPT;
-	case SMDB_ACCESS_ERROR:
-		rc = SMFIS_REJECT;
-		goto error0;
-	case SMDB_ACCESS_REJECT:
-		rc = mfReply(ctx, "550", "5.7.1", "recipient blocked");
-		goto error0;
-	}
-#else
-{
-	const char *error;
+	access = smfAccessRcpt(&data->work, MILTER_NAME "-to:", args[0]);
 
-        /* TEST: Validate the syntax and chop up the RCPT address. */
-        if ((error = parsePath(args[0], smfFlags, 0, &data->work.rcpt)) != NULL) {
-                rc = mfReply(&data->work, "553", NULL, error);
-                goto error0;
-        }
-}
-#endif
+	switch (access) {
+	case SMDB_ACCESS_REJECT:
+		statCount(&stat_access_bl);
+		return smfReply(&data->work, 550, "5.7.1", "recipient blocked");
+
+	case SMDB_ACCESS_OK:
+		statCount(&stat_access_wl);
+		smfLog(SMF_LOG_TRACE, TAG_FORMAT "recipient %s white listed", TAG_ARGS, args[0]);
+		data->work.skipMessage = 1;
+		return SMFIS_ACCEPT;
+
+	/* smfAccessRcpt failure cases. */
+	case SMDB_ACCESS_TEMPFAIL:
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "recipient %s temp.failed", TAG_ARGS, args[0]);
+		statCount(&stat_access_other);
+		return SMFIS_TEMPFAIL;
+
+	case SMDB_ACCESS_ERROR:
+		smfLog(SMF_LOG_ERROR, TAG_FORMAT "recipient %s unknown error", TAG_ARGS, args[0]);
+		statCount(&stat_access_other);
+		return SMFIS_REJECT;
+	}
+
 	if (rcpt_addr == args[0])
 		rcpt_addr = data->work.rcpt->address.string;
 
@@ -872,20 +1009,12 @@ filterRcpt(SMFICTX *ctx, char **args)
 		goto error0;
 	}
 
-#ifndef ENABLE_BW_LIST_SUPPORT
-	if ((smfFlags & SMF_FLAG_REJECT_PERCENT_RELAY)
-	&& strchr(data->work.rcpt->address.string, '%') != NULL) {
-		rc = mfReply(ctx, "550", NULL, "routed address relaying denied");
-		goto error0;
-	}
-#endif
-
-	if (0 < optMaxFailures.value && !data->work.skipMessage && cacheGet(data, data->client_addr, &entry) == 0 && optMaxFailures.value <= entry.count) {
-		rc = mfReply(ctx, "550", "5.7.1", "too many failures %lu from %s [%s]",  entry.count, data->client_name, data->client_addr);
+	if (0 < optMaxFailures.value && !data->work.skipMessage && cacheGet(data, data->work.client_addr, &entry) == 0 && optMaxFailures.value <= entry.count) {
+		rc = mfReply(ctx, "550", "5.7.1", "too many failures %lu from %s [%s]",  entry.count, data->work.client_name, data->work.client_addr);
 		goto error0;
 	}
 
-	smfLog(SMF_LOG_DEBUG, TAG_FORMAT "failures %lu from %s [%s]", TAG_ARGS, entry.count, data->client_name, data->client_addr);
+	smfLog(SMF_LOG_DEBUG, TAG_FORMAT "failures %lu from %s [%s]", TAG_ARGS, entry.count, data->work.client_name, data->work.client_addr);
 
 	/* Check for accept-the-bounce domains / hosts. */
 	if (optIsBlindMx.value && *rcpt_host != '\0' && cacheGet(data, rcpt_host, &entry) == 0) {
@@ -920,7 +1049,7 @@ filterRcpt(SMFICTX *ctx, char **args)
 				/* Update the cache for the client address
 				 * based on this call-ahead cache hit.
 				 */
-				(void) cacheUpdate(data, data->client_addr, &entry);
+				(void) cacheUpdate(data, data->work.client_addr, &entry);
 				goto error0;
 			}
 			break;
@@ -942,13 +1071,14 @@ filterRcpt(SMFICTX *ctx, char **args)
 	smfLog(SMF_LOG_DIALOG, TAG_FORMAT "contacting " HOP_INFO_FORMAT, TAG_ARGS, HOP_INFO_ARGS);
 
 	/* Connect to next hop. */
+	data->server = NULL;
 	if (*optCallAheadHost.string != '\0') {
 		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "trying to connect to host %s...", TAG_ARGS, rcpt_host);
 		if (socketOpenClient(rcpt_host, SMTP_PORT, optSmtpTimeout.value, NULL, &data->server) == 0)
 			smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to host %s", TAG_ARGS, rcpt_host);
 	} else if (!optMxLookup.value || (mxConnect(data, rcpt_host) && !optIgnoreRcptHost.value)) {
 		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "trying to connect to host %s...", TAG_ARGS, rcpt_host);
-		if (socketOpenClient(rcpt_host, SMTP_PORT, optSmtpTimeout.value, NULL, &data->server) == 0)
+		if ((data->server = socketConnect(rcpt_host, SMTP_PORT, optSmtpTimeout.value)) == NULL)
 			smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to host %s", TAG_ARGS, rcpt_host);
 	}
 
@@ -998,7 +1128,7 @@ filterRcpt(SMFICTX *ctx, char **args)
 	}
 
 	/* The next hop is alive and willing to receive. */
-	if (optPrimaryUpReject.value && !isReservedIP(data->client_addr, IS_IP_LOCAL_OR_LAN) && *optCallAheadHost.string == '\0') {
+	if (optPrimaryUpReject.value && !isReservedIP(data->work.client_addr, IS_IP_LOCAL|IS_IP_LAN) && *optCallAheadHost.string == '\0') {
 		/* This does not conform with RFC 974 section "Interpreting
 		 * the List of MX RRs", paragraph 7, sentence 2 and 3, which
 		 * only requires mail clients to attempt delivery to the
@@ -1115,7 +1245,7 @@ error2:
 
 	/* Do not cache temporary failure results. */
 	if (rc != SMFIS_TEMPFAIL) {
-		(void) cacheUpdate(data, data->client_addr, &entry);
+		(void) cacheUpdate(data, data->work.client_addr, &entry);
 	}
 error1:
 	/* Some how we are getting ENOTSOCK during getSmtpResponse(),
@@ -1144,6 +1274,7 @@ error1:
 	socketClose(data->server);
 	data->server = NULL;
 error0:
+	statCount((rc == SMFIS_REJECT || rc == SMFIS_TEMPFAIL) ? &stat_rcpts_reject : &stat_rcpts_accept);
 	free(value);
 
 	return rc;
@@ -1175,6 +1306,77 @@ cacheRemove(workspace data, char *name)
 }
 
 static sfsistat
+statCommand(SMFICTX * ctx, const char *command)
+{
+	sfsistat rc;
+	Stat **stat;
+	Vector words;
+	workspace data;
+	char stamp[40];
+	struct tm local;
+	unsigned long age, d, h, m, s;
+	size_t buffer_length, line_length;
+	char buffer[2048], *lines[SMF_MAX_MULTILINE_REPLY], **line;
+
+	rc = SMFIS_CONTINUE;
+
+	if ((data = (workspace) smfi_getpriv(ctx)) == NULL)
+		return smfNullWorkspaceError("statCommand");
+
+	smfLog(SMF_LOG_TRACE, TAG_FORMAT "statCommand(%lx, '%s')", TAG_ARGS, (long) ctx, command);
+
+	if ((words = TextSplit(command, " \t", 0)) == NULL)
+		goto error0;
+	if (VectorLength(words) != 2)
+		goto error1;
+	if (TextInsensitiveCompare("STAT", VectorGet(words, 0)) != 0)
+		goto error1;
+	if (TextInsensitiveCompare(MILTER_NAME, VectorGet(words, 1)) != 0)
+		goto error1;
+
+	/* Only localhost can query the status for security. */
+	if (!isReservedIP(data->work.client_addr, IS_IP_LOOPBACK|IS_IP_LOCALHOST)) {
+		rc = SMFIS_REJECT;
+		goto error1;
+	}
+
+	line = lines;
+	buffer_length = 0;
+
+	(void) localtime_r((time_t *) &stat_start_time.count, &local);
+	(void) strftime(stamp, sizeof (stamp), "%a, %d %b %Y %H:%M:%S %z", &local);
+	line_length = snprintf(buffer+buffer_length, sizeof (buffer)-buffer_length, "%s=%s", stat_start_time.name, stamp);
+	*line++ = buffer + buffer_length;
+	buffer_length += line_length+1;
+
+	age = s = (unsigned long) (time(NULL) - (time_t) stat_start_time.count);
+	d = s / 86400;
+	s -= d * 86400;
+	h = s / 3600;
+	s -= h * 3600;
+	m = s / 60;
+	s -= m * 60;
+
+	line_length = snprintf(buffer+buffer_length, sizeof (buffer)-buffer_length, "%s=%lu (%.2lu %.2lu:%.2lu:%.2lu)", stat_run_time.name, age, d, h, m, s);
+	*line++ = buffer + buffer_length;
+	buffer_length += line_length+1;
+
+	for (stat = stat_table+2; *stat != NULL; stat++) {
+		line_length = snprintf(buffer+buffer_length, sizeof (buffer)-buffer_length, "%s=%lu", (*stat)->name, (*stat)->count);
+		*line++ = buffer + buffer_length;
+		buffer_length += line_length+1;
+	}
+	*line = NULL;
+
+	(void) smfMultiLineReplyA(&data->work, 411, "4.0.0", lines);
+	rc = SMFIS_TEMPFAIL;
+error1:
+	VectorDestroy(words);
+error0:
+	return rc;
+}
+
+static sfsistat
 filterUnknown(SMFICTX * ctx, const char *command)
 {
 	char *word;
@@ -1190,11 +1392,14 @@ filterUnknown(SMFICTX * ctx, const char *command)
 
 	smfLog(SMF_LOG_TRACE, TAG_FORMAT "filterUnknown(%lx, '%s')", TAG_ARGS, (long) ctx, command);
 
+	if ((rc = statCommand(ctx, command)) != SMFIS_CONTINUE)
+		goto error0;
+
 	/* Only accept this command from permitted hosts. */
 #ifdef RESTRICT_COMMANDS_TO_LOCALHOST
-	if (strcmp(data->client_addr, "127.0.0.1") != 0 && strcmp(data->client_addr, "::1") != 0)
+	if (!isReservedIP(data->work.client_addr, IS_IP_LOOPBACK|IS_IP_LOCALHOST))
 #else
-	if (smfAccessClient(&data->work, MILTER_NAME "-command:", data->client_name, data->client_addr, NULL, NULL) != SMDB_ACCESS_OK)
+	if (smfAccessClient(&data->work, MILTER_NAME "-command:", data->work.client_name, data->work.client_addr, NULL, NULL) != SMDB_ACCESS_OK)
 #endif
 		goto error0;
 
@@ -1269,6 +1474,8 @@ filterClose(SMFICTX *ctx)
 
 	smfLog(SMF_LOG_TRACE, TAG_FORMAT "filterClose(%lx)", cid, smfNoQueue, (long) ctx);
 
+	statAddValue(&stat_connect_active, -1);
+
 	return SMFIS_CONTINUE;
 }
 
@@ -1339,6 +1546,89 @@ atExitCleanUp()
 	smfAtExitCleanUp();
 }
 
+void
+printVersion(void)
+{
+	printf(MILTER_NAME " " MILTER_VERSION " " MILTER_COPYRIGHT "\n");
+	printf("LibSnert %s %s", LIBSNERT_VERSION, LIBSNERT_COPYRIGHT "\n");
+#ifdef _BUILT
+	printf("Built on " _BUILT "\n");
+#endif
+}
+
+#define LINE_WRAP 70
+
+void
+printVar(int columns, const char *name, const char *value)
+{
+	int length;
+	Vector list;
+	const char **args;
+
+	if (columns <= 0)
+		printf("%s=\"%s\"\n",  name, value);
+	else if ((list = TextSplit(value, " \t", 0)) != NULL && 0 < VectorLength(list)) {
+		args = (const char **) VectorBase(list);
+
+		length = printf("%s=\"'%s'", name, *args);
+		for (args++; *args != NULL; args++) {
+			/* Line wrap. */
+			if (columns <= length + strlen(*args) + 4) {
+				(void) printf("\n\t");
+				length = 8;
+			}
+			length += printf(" '%s'", *args);
+		}
+		if (columns <= length + 1) {
+			(void) printf("\n");
+		}
+		(void) printf("\"\n");
+
+		VectorDestroy(list);
+	}
+}
+
+void
+printInfo(void)
+{
+#ifdef MILTER_NAME
+	printVar(0, "MILTER_NAME", MILTER_NAME);
+#endif
+#ifdef MILTER_VERSION
+	printVar(0, "MILTER_VERSION", MILTER_VERSION);
+#endif
+#ifdef MILTER_COPYRIGHT
+	printVar(0, "MILTER_COPYRIGHT", MILTER_COPYRIGHT);
+#endif
+#ifdef MILTER_CONFIGURE
+	printVar(LINE_WRAP, "MILTER_CONFIGURE", MILTER_CONFIGURE);
+#endif
+#ifdef _BUILT
+	printVar(0, "MILTER_BUILT", _BUILT);
+#endif
+#ifdef LIBSNERT_VERSION
+	printVar(0, "LIBSNERT_VERSION", LIBSNERT_VERSION);
+#endif
+#ifdef LIBSNERT_BUILD_HOST
+	printVar(LINE_WRAP, "LIBSNERT_BUILD_HOST", LIBSNERT_BUILD_HOST);
+#endif
+#ifdef LIBSNERT_CONFIGURE
+	printVar(LINE_WRAP, "LIBSNERT_CONFIGURE", LIBSNERT_CONFIGURE);
+#endif
+#ifdef SQLITE_VERSION
+	printVar(0, "SQLITE3_VERSION", SQLITE_VERSION);
+#endif
+#ifdef MILTER_CFLAGS
+	printVar(LINE_WRAP, "CFLAGS", MILTER_CFLAGS);
+#endif
+#ifdef MILTER_LDFLAGS
+	printVar(LINE_WRAP, "LDFLAGS", MILTER_LDFLAGS);
+#endif
+#ifdef MILTER_LIBS
+	printVar(LINE_WRAP, "LIBS", MILTER_LIBS);
+#endif
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1370,7 +1660,14 @@ main(int argc, char **argv)
 		(void) optionArrayL(argc, argv, optTable, smfOptTable, NULL);
 	}
 
-	/* Show them the funny farm. */
+	if (opt_version.string != NULL) {
+		printVersion();
+		exit(EX_USAGE);
+	}
+	if (opt_info.string != NULL) {
+		printInfo();
+		exit(EX_USAGE);
+	}
 	if (smfOptHelp.string != NULL) {
 		optionUsageL(optTable, smfOptTable, NULL);
 		exit(2);
@@ -1436,7 +1733,7 @@ main(int argc, char **argv)
 	(void) smfSetFileOwner(&milter, optCacheFile.string);
 
 	if (smfLogDetail & SMF_LOG_DNS)
-		DnsSetDebug(1);
+		pdqSetDebug(1);
 
 	if (smfLogDetail & SMF_LOG_SOCKET_ALL)
 		socketSetDebug(10);
