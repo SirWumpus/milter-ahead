@@ -164,8 +164,7 @@ static struct bitword isIpBits[] = {
 	{ IS_IP_PRIVATE_A,	"private-a" },
 	{ IS_IP_PRIVATE_B,	"private-b" },
 	{ IS_IP_PRIVATE_C,	"private-c" },
-	{ IS_IP_RESERVED,	"reserved" },
-	{ IS_IP_SITE_LOCAL,	"site-local" },
+	{ IS_IP_V6_RESERVED,	"ip6-reserved" },
 	{ IS_IP_TEST_NET,	"test-net" },
 	{ IS_IP_THIS_NET,	"this-net" },
 	{ 0, NULL }
@@ -819,7 +818,7 @@ mxConnect(workspace data, char *domain)
 	if (smfLogDetail & SMF_LOG_DIALOG)
 		pdqListLog(list);
 
-	list = pdqListPrune(list, IS_IP_TEST|IS_IP_LINK_LOCAL|IS_IP_SITE_LOCAL|IS_IP_MULTICAST|IS_IP_RESERVED);
+	list = pdqListPrune(list, IS_IP_TEST|IS_IP_LINK_LOCAL|IS_IP_MULTICAST|IS_IP_V6_RESERVED);
 
 	if (list == NULL) {
 		syslog(LOG_ERR, TAG_FORMAT "%s: has no acceptable MX", TAG_ARGS, domain);
