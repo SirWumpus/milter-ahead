@@ -161,12 +161,14 @@ static struct bitword isIpBits[] = {
 	{ IS_IP_LOCALHOST,	"localhost" },
 	{ IS_IP_LOOPBACK,	"loopback" },
 	{ IS_IP_MULTICAST,	"multicast" },
+	{ IS_IP_PROTOCOL,	"protocol" },
 	{ IS_IP_PRIVATE_A,	"private-a" },
 	{ IS_IP_PRIVATE_B,	"private-b" },
 	{ IS_IP_PRIVATE_C,	"private-c" },
-	{ IS_IP_RESERVED,	"reserved" },
-	{ IS_IP_SITE_LOCAL,	"site-local" },
-	{ IS_IP_TEST_NET,	"test-net" },
+	{ IS_IP_V6_RESERVED,	"reserved" },
+	{ IS_IP_TEST_NET_1,	"test-net-1" },
+	{ IS_IP_TEST_NET_2,	"test-net-2" },
+	{ IS_IP_TEST_NET_3,	"test-net-3" },
 	{ IS_IP_THIS_NET,	"this-net" },
 	{ 0, NULL }
 };
@@ -754,6 +756,7 @@ filterMail(SMFICTX *ctx, char **args)
 		return SMFIS_REJECT;
 	}
 
+	auth_authen = smfi_getsymval(ctx, "{auth_authen}");
 	access = smfAccessAuth(&data->work, MILTER_NAME "-auth:", auth_authen, args[0], NULL, NULL);
 
 	switch (access) {
@@ -819,7 +822,7 @@ mxConnect(workspace data, char *domain)
 	if (smfLogDetail & SMF_LOG_DIALOG)
 		pdqListLog(list);
 
-	list = pdqListPrune(list, IS_IP_TEST|IS_IP_LINK_LOCAL|IS_IP_SITE_LOCAL|IS_IP_MULTICAST|IS_IP_RESERVED);
+	list = pdqListPrune(list, IS_IP_TEST_NET|IS_IP_LOCAL|IS_IP_LINK_LOCAL|IS_IP_MULTICAST|IS_IP_V6_RESERVED);
 
 	if (list == NULL) {
 		syslog(LOG_ERR, TAG_FORMAT "%s: has no acceptable MX", TAG_ARGS, domain);
