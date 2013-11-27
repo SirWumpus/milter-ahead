@@ -15,6 +15,10 @@ is no set schedule for releases.
    +	Add support for :port specifier with host name or IP in RHS
    	of call-ahead-db records. Requested by Mark Hellegers.
 
+--1.13.2--
+
+   !	 Fixed mxConnect() skipping of PDQ_SECTION_QUERY records.
+
 --1.13.1--
 
    *	Requires LibSnert 1.75.22

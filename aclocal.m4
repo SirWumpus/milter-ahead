@@ -29,7 +29,7 @@ m4_define([SNERT_GCC_SETTINGS],[
 	AS_IF([test $GCC = 'yes'],[
 		GCC_MAJOR=`$CC -dM -E -xc /dev/null | sed -n -e 's/.*__GNUC__ \(.*\)/\1/p'`
 		GCC_MINOR=`$CC -dM -E -xc /dev/null | sed -n -e 's/.*__GNUC_MINOR__ \(.*\)/\1/p'`
-		AS_IF([test $GCC_MAJOR -ge 4],[CFLAGS="-Wno-pointer-sign $CFLAGS"])
+dnl		AS_IF([test $GCC_MAJOR -ge 4],[CFLAGS="-Wno-pointer-sign $CFLAGS"])
 		AS_IF([test $GCC_MAJOR -ge 3],[CFLAGS="-Wno-char-subscripts $CFLAGS"])
 		CFLAGS="-Wall $CFLAGS"
 	])
@@ -41,9 +41,10 @@ m4_define([SNERT_GCC_SETTINGS],[
 	])
 
 	if test ${platform:-UNKNOWN} = 'CYGWIN'; then
-		if test ${enable_debug:-no} = 'no'; then
-			CFLAGS="-s ${CFLAGS}"
-		fi
+		AS_IF([test ${enable_debug:-no} = 'no'],[CFLAGS="-s ${CFLAGS}"])
+		CFLAGS="-I/usr/include/w32api ${CFLAGS}"
+		LDFLAGS="-L/usr/lib/w32api ${LDFLAGS}"
+
 dnl 		if test ${enable_win32:-no} = 'yes'; then
 dnl 			dnl -s		strip, no symbols
 dnl 			dnl -mno-cygwin	native windows console app
@@ -302,7 +303,7 @@ AS_IF([test ${with_db:-default} != 'no'],[
 	for d in $BDB_BASE_DIRS ; do
 		if test -d "$d/include" ; then
 			bdb_dir_list="$bdb_dir_list $d"
-			bdb_i_dirs=`ls -d $d/include/db[[0-9]] $d/include/db $d/include 2>/dev/null | sort -r`
+			bdb_i_dirs=`ls -d $d/include/db[[0-9]]* $d/include/db $d/include/. 2>/dev/null | sort -r`
 
 			for BDB_I_DIR in $bdb_i_dirs ; do
 				AC_MSG_CHECKING([for db.h in $BDB_I_DIR])
@@ -311,12 +312,12 @@ AS_IF([test ${with_db:-default} != 'no'],[
 					AC_MSG_RESULT(yes)
 					v=`basename $BDB_I_DIR`
 					if test $v = 'include' ; then
-						 v=''
+						 v='.'
 					fi
 
-					if test -d $d/lib64/$v -a $v != '.' ; then
+					if test -d $d/lib64/$v -a "$v" != '.' ; then
 						BDB_L_DIR="$d/lib64/$v"
-					elif test -d $d/lib/$v -a $v != '.'; then
+					elif test -d $d/lib/$v -a "$v" != '.'; then
 						BDB_L_DIR="$d/lib/$v"
 					elif test -d $d/lib64 ; then
 						BDB_L_DIR="$d/lib64"
@@ -383,6 +384,11 @@ main(int argc, char **argv)
 								AC_SUBST(HAVE_LIB_DB, "-l$l")
 								AC_SUBST(CFLAGS_DB, "-I$BDB_I_DIR")
 								AC_SUBST(LDFLAGS_DB, "-L$BDB_L_DIR")
+
+								AC_DEFINE_UNQUOTED(HAVE_LIB_DB, "-l$l")
+								AC_DEFINE_UNQUOTED(LDFLAGS_DB, "-I$BDB_I_DIR")
+								AC_DEFINE_UNQUOTED(CFLAGS_DB, "-L$BDB_L_DIR")
+
 							fi
 						])
 						AC_MSG_RESULT($bdb_found)
@@ -470,7 +476,7 @@ main(int argc, char **argv)
 				]])
 			],[
 				libpath=[`$ldd_tool ./conftest$ac_exeext | sed -n -e "/lib$1/s/.* \([^ ]*lib$1[^ ]*\).*/\1/p"`]
-				if ./conftest$ac_exeext $libpath ; then
+				if ./conftest$ac_exeext ${libpath:-unknown} ; then
 					AS_VAR_SET([snert_lib], [${libpath}])
 				else
 					AS_VAR_SET([snert_lib], 'no')
@@ -485,45 +491,6 @@ main(int argc, char **argv)
 
 AC_DEFUN(SNERT_FIND_LIBC,[
 	SNERT_FIND_LIB([c],[AC_DEFINE_UNQUOTED(LIBC_PATH, ["$snert_find_lib_c"])], [])
-dnl 	echo
-dnl 	echo "Finding version of libc..."
-dnl 	echo
-dnl
-dnl 	AC_CHECK_HEADER([dlfcn.h], [
-dnl 		AC_DEFINE_UNQUOTED(HAVE_DLFCN_H)
-dnl 		AC_CHECK_TOOL(ldd_tool, ldd)
-dnl 		if test ${ldd_tool:-no} != 'no'	; then
-dnl 			AC_CHECK_LIB([dl],[dlopen])
-dnl 			AC_MSG_CHECKING([for libc])
-dnl 			AC_RUN_IFELSE([
-dnl 				AC_LANG_SOURCE([[
-dnl #include <stdio.h>
-dnl #include <stdlib.h>
-dnl #ifdef HAVE_DLFCN_H
-dnl # include <dlfcn.h>
-dnl #endif
-dnl
-dnl int
-dnl main(int argc, char **argv)
-dnl {
-dnl 	void *handle;
-dnl 	handle = dlopen(argv[1], RTLD_NOW);
-dnl 	return dlerror() != NULL;
-dnl }
-dnl 				]])
-dnl 			],[
-dnl 				libc=[`$ldd_tool ./conftest$ac_exeext | sed -n -e '/libc/s/.* \([^ ]*libc[^ ]*\).*/\1/p'`]
-dnl 				if ./conftest$ac_exeext $libc ; then
-dnl 					AC_DEFINE_UNQUOTED(LIBC_PATH, ["$libc"])
-dnl 				else
-dnl 					libc='not found'
-dnl 				fi
-dnl 			],[
-dnl 				libc='not found'
-dnl 			])
-dnl 			AC_MSG_RESULT($libc)
-dnl 		fi
-dnl 	])
 ])
 
 
@@ -611,13 +578,17 @@ AC_DEFUN(SNERT_LIBMILTER,[
 	saved_ldflags="$LDFLAGS"
 
 if test ${with_milter:-default} != 'no' ; then
-	for d in "$with_milter" /usr/local /usr/pkg ; do
+	for d in "$with_milter" /usr /usr/local /usr/pkg ; do
 		unset ac_cv_search_smfi_main
 		unset ac_cv_header_libmilter_mfapi_h
 
 		if test X$d != X ; then
 			CFLAGS_MILTER="-I$d/include"
-			LDFLAGS_MILTER="-L$d/lib"
+			if test -d $d/lib/libmilter ; then
+				LDFLAGS_MILTER="-L$d/lib/libmilter"
+			else
+				LDFLAGS_MILTER="-L$d/lib"
+			fi
 		fi
 		echo "trying with $LDFLAGS_MILTER ..."
 
@@ -630,9 +601,14 @@ if test ${with_milter:-default} != 'no' ; then
 		if test "$ac_cv_search_smfi_main" != 'no' -a "$ac_cv_header_libmilter_mfapi_h" != 'no' ; then
 			LIBS="-lmilter -lpthread $saved_libs"
 			AC_CHECK_FUNCS([smfi_addheader smfi_addrcpt smfi_addrcpt_par smfi_chgfrom smfi_chgheader smfi_delrcpt smfi_getpriv smfi_getsymval smfi_insheader smfi_main smfi_opensocket smfi_progress smfi_quarantine smfi_register smfi_replacebody smfi_setbacklog smfi_setconn smfi_setdbg smfi_setmaxdatasize smfi_setmlreply smfi_setpriv smfi_setreply smfi_setsymlist smfi_settimeout smfi_stop smfi_version])
+
 			AC_SUBST(HAVE_LIB_MILTER, "-lmilter")
 			AC_SUBST(LDFLAGS_MILTER)
 			AC_SUBST(CFLAGS_MILTER)
+
+			AC_DEFINE_UNQUOTED(LDFLAGS_MILTER, "${LDFLAGS_MILTER}")
+			AC_DEFINE_UNQUOTED(CFLAGS_MILTER, "${CFLAGS_MILTER}")
+
 			with_milter="$d"
 			break
 		fi
@@ -1163,6 +1139,11 @@ else
 		AC_SUBST(CFLAGS_PTHREAD)
 		AC_SUBST(LDFLAGS_PTHREAD)
 
+		AC_DEFINE_UNQUOTED(HAVE_LIB_PTHREAD, "${HAVE_LIB_PTHREAD}")
+		AC_DEFINE_UNQUOTED(LDFLAGS_PTHREAD, "${LDFLAGS_PTHREAD}")
+		AC_DEFINE_UNQUOTED(CFLAGS_PTHREAD, "${CFLAGS_PTHREAD}")
+
+		LIBS="$HAVE_LIB_PTHREAD $saved_libs"
 		CFLAGS="$CFLAGS_PTHREAD $saved_cflags"
 		LDFLAGS="$LDFLAGS_PTHREAD $saved_ldflags"
 
@@ -1185,6 +1166,7 @@ else
 		AC_CHECK_FUNCS([pthread_mutex_init pthread_mutex_destroy pthread_mutex_lock pthread_mutex_trylock pthread_mutex_unlock])
 		AC_CHECK_FUNCS([pthread_mutexattr_init pthread_mutexattr_destroy pthread_mutexattr_setprioceiling pthread_mutexattr_getprioceiling pthread_mutexattr_setprotocol pthread_mutexattr_getprotocol pthread_mutexattr_settype pthread_mutexattr_gettype])
 		AC_CHECK_FUNCS([pthread_cond_broadcast pthread_cond_destroy pthread_cond_init pthread_cond_signal pthread_cond_timedwait pthread_cond_wait])
+		AC_CHECK_FUNCS([pthread_spin_init pthread_spin_destroy pthread_spin_lock pthread_spin_trylock pthread_spin_unlock])
 		AC_CHECK_FUNCS([pthread_rwlock_init pthread_rwlock_destroy pthread_rwlock_unlock pthread_rwlock_rdlock pthread_rwlock_wrlock pthread_rwlock_tryrdlock pthread_rwlock_trywrlock])
 		AC_CHECK_FUNCS([pthread_lock_global_np pthread_unlock_global_np])
 		AC_CHECK_FUNCS([pthread_key_create pthread_key_delete pthread_getspecific pthread_setspecific])
@@ -1209,9 +1191,9 @@ else
 
 		SNERT_FIND_LIB([pthread],[AC_DEFINE_UNQUOTED(LIBPTHREAD_PATH, ["$snert_find_lib_pthread"])], [])
 
-dnl		LIBS="$saved_libs"
-dnl		CFLAGS="$saved_cflags"
-dnl		LDFLAGS="$saved_ldflags"
+		LIBS="$saved_libs"
+		CFLAGS="$saved_cflags"
+		LDFLAGS="$saved_ldflags"
 	])
 fi
 ])
@@ -1230,7 +1212,13 @@ AC_DEFUN(SNERT_POSIX_SEMAPHORES,[
 		saved_libs=$LIBS
 		LIBS=''
 
-		AC_SEARCH_LIBS([sem_init],[rt pthread],[AC_DEFINE_UNQUOTED(HAVE_LIB_SEM, "${ac_cv_search_sem_init}") AC_SUBST(HAVE_LIB_SEM, ${ac_cv_search_sem_init}) NETWORK_LIBS="${ac_cv_search_sem_init} $NETWORK_LIBS"])
+		AC_SEARCH_LIBS([sem_init],[rt pthread],[
+			AS_IF([test "${ac_cv_search_sem_init}" = 'none required'],[ac_cv_search_sem_init=''])
+
+			AC_DEFINE_UNQUOTED(HAVE_LIB_SEM, "${ac_cv_search_sem_init}")
+			AC_SUBST(HAVE_LIB_SEM, ${ac_cv_search_sem_init})
+			NETWORK_LIBS="${ac_cv_search_sem_init} $NETWORK_LIBS"]
+		)
 		AC_CHECK_TYPES([sem_t],[],[],[
 #ifdef HAVE_SYS_TYPES_H
 # include <sys/types.h>
@@ -1342,7 +1330,7 @@ AC_DEFUN(SNERT_ANSI_TIME,[
 	echo "Check for ANSI & supplemental time support..."
 	echo
 
-	saved_libs=$LIBS
+dnl	saved_libs=$LIBS
 
 	case "${platform}" in
 	Linux|SunOS|Solaris)
@@ -1393,7 +1381,17 @@ dnl #endif
 	AC_STRUCT_TM
 	AC_STRUCT_TIMEZONE
 
-	LIBS=$saved_libs
+dnl	LIBS=$saved_libs
+])
+
+dnl
+dnl SNERT_EXTRA_STDIO
+dnl
+AC_DEFUN(SNERT_EXTRA_STDIO,[
+	echo
+	echo "Check for supplemental stdio support..."
+	echo
+	AC_CHECK_FUNCS(getdelim getline)
 ])
 
 dnl
@@ -1419,6 +1417,16 @@ AC_DEFUN(SNERT_REGEX,[
 		AC_SEARCH_LIBS([regcomp], [regex])
 		AC_CHECK_FUNCS(regcomp regexec regerror regfree)
 	])
+])
+
+dnl
+dnl SNERT_HASHES
+dnl
+AC_DEFUN(SNERT_HASHES,[
+	echo
+	echo "Check for common hashes..."
+	echo
+	AC_CHECK_HEADERS([md4.h md5.h rmd160.h sha1.h sha2.h],[],[],[/* */])
 ])
 
 dnl
@@ -1467,6 +1475,11 @@ AS_IF([test ${with_libev:-default} != 'no' -a ${with_libev:-default} != 'default
 			AC_SUBST(HAVE_LIB_LIBEV, "-lev")
 			AC_SUBST(LDFLAGS_LIBEV)
 			AC_SUBST(CFLAGS_LIBEV)
+
+			AC_DEFINE_UNQUOTED(HAVE_LIB_LIBEV, "${HAVE_LIB_LIBEV}")
+			AC_DEFINE_UNQUOTED(LDFLAGS_LIBEV, "${LDFLAGS_LIBEV}")
+			AC_DEFINE_UNQUOTED(CFLAGS_LIBEV, "${CFLAGS_LIBEV}")
+
 			with_libev="$d"
 			break
 		])
@@ -1512,6 +1525,10 @@ AS_IF([test ${with_lua:-default} != 'no'],[
 			AC_SUBST(HAVE_LIB_LUA, "-llua -lm")
 			AC_SUBST(LDFLAGS_LUA)
 			AC_SUBST(CFLAGS_LUA)
+
+			AC_DEFINE_UNQUOTED(LDFLAGS_LUA, "${LDFLAGS_LUA}")
+			AC_DEFINE_UNQUOTED(CFLAGS_LUA, "${CFLAGS_LUA}")
+
 			with_lua="$d"
 			break
 		fi
@@ -1564,6 +1581,10 @@ AS_IF([test ${with_openssl:-default} != 'no'],[
 			AC_SUBST(HAVE_LIBSSL, '-lssl')
 			AC_SUBST(LDFLAGS_SSL)
 			AC_SUBST(CFLAGS_SSL)
+
+			AC_DEFINE_UNQUOTED(LDFLAGS_SSL, "${LDFLAGS_SSL}")
+			AC_DEFINE_UNQUOTED(CFLAGS_SSL, "${CFLAGS_SSL}")
+
 			with_openssl="$d"
 			break
 		fi
@@ -1645,6 +1666,9 @@ dnl		AC_SUBST(HAVE_LIB_SQLITE3, "-lsqlite3")
 	fi
 	AC_SUBST(CFLAGS_SQLITE3)
 
+	AC_DEFINE_UNQUOTED(LDFLAGS_SQLITE3, "${LDFLAGS_SQLITE3}")
+	AC_DEFINE_UNQUOTED(CFLAGS_SQLITE3, "${CFLAGS_SQLITE3}")
+
 	LIBS=$saved_libs
 	CFLAGS=$saved_cflags
 	LDFLAGS=$saved_ldflags
@@ -1715,8 +1739,8 @@ AC_DEFUN(SNERT_BUILD_THREADED_SQLITE3,[
 				)
 				AS_IF([test ${platform} != 'Darwin'],[sqlite3_configure_options="${sqlite3_configure_options} --enable-static --disable-shared"])
 
-				echo CFLAGS="'${sqlite3_cflags} ${CFLAGS} ${CFLAGS_PTHREAD}'" LDFLAGS="'${LDFLAGS} ${LDFLAGS_PTHREAD}'" ./configure  ${sqlite3_configure_options}
-				CFLAGS="${sqlite3_cflags} ${CFLAGS} ${CFLAGS_PTHREAD}" LDFLAGS="${LDFLAGS} ${LDFLAGS_PTHREAD}" ./configure  ${sqlite3_configure_options}
+				echo ./configure CFLAGS="'${sqlite3_cflags}'" ${sqlite3_configure_options}
+				./configure CFLAGS="${sqlite3_cflags}" ${sqlite3_configure_options}
 				echo
 			fi
 			echo
@@ -1801,6 +1825,11 @@ dnl #endif
 				getifaddrs freeifaddrs
 			])
 		])
+		AC_CHECK_HEADERS([net/if.h],[
+			AC_CHECK_FUNCS([ \
+				if_nameindex if_freenameindex if_nametoindex if_indextoname
+			])
+		])
 	else
 		AC_CHECK_HEADERS(windows.h io.h)
 		AC_CHECK_HEADER(winsock2.h,[
@@ -1860,6 +1889,9 @@ dnl #endif
 			AC_DEFINE_UNQUOTED(AS_TR_CPP([HAVE_]$i))
 			AC_MSG_RESULT([assumed in winsock2.h & ws2tcpip.h])
 		done
+	fi
+
+	if test ${platform:-UNKNOWN} = 'CYGWIN' -o ${ac_cv_define___WIN32__:-no} != 'no'; then
 		AC_SUBST(HAVE_LIB_WS2_32, '-lws2_32')
 		AC_SUBST(HAVE_LIB_IPHLPAPI, '-lIphlpapi')
 		NETWORK_LIBS="-lws2_32 -lIphlpapi $NETWORK_LIBS"
