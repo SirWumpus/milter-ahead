@@ -841,7 +841,7 @@ mxConnect(workspace data, char *domain)
 	/* Try all MX of a lower preference until one answers. */
 	socket = NULL;
 	for (mx = (PDQ_MX *) list; mx != NULL; mx = (PDQ_MX *) mx->rr.next) {
-		if (mx->section == PDQ_SECTION_QUERY
+		if (mx->rr.section == PDQ_SECTION_QUERY
 		|| mx->rr.type != PDQ_TYPE_MX || preference <= mx->preference)
 			continue;
 
