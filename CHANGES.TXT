@@ -17,7 +17,9 @@ is no set schedule for releases.
 
 --1.13.2--
 
-   !	 Fixed mxConnect() skipping of PDQ_SECTION_QUERY records.
+   *	Requires LibSnert 1.75.31
+
+   !	Fixed mxConnect() skipping of PDQ_SECTION_QUERY records.
 
 --1.13.1--
 
