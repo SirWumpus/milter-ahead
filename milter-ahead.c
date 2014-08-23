@@ -838,6 +838,8 @@ mxConnect(workspace data, char *domain)
 	if (preference == 0)
 		preference = 65535;
 
+	smfLog(SMF_LOG_DIALOG, TAG_FORMAT "MX preference < %d", TAG_ARGS, preference);
+
 	/* Try all MX of a lower preference until one answers. */
 	socket = NULL;
 	for (mx = (PDQ_MX *) list; mx != NULL; mx = (PDQ_MX *) mx->rr.next) {
@@ -1558,38 +1560,6 @@ printVersion(void)
 #ifdef _BUILT
 	printf("Built on " _BUILT "\n");
 #endif
-}
-
-#define LINE_WRAP 70
-
-void
-printVar(int columns, const char *name, const char *value)
-{
-	int length;
-	Vector list;
-	const char **args;
-
-	if (columns <= 0)
-		printf("%s=\"%s\"\n",  name, value);
-	else if ((list = TextSplit(value, " \t", 0)) != NULL && 0 < VectorLength(list)) {
-		args = (const char **) VectorBase(list);
-
-		length = printf("%s=\"'%s'", name, *args);
-		for (args++; *args != NULL; args++) {
-			/* Line wrap. */
-			if (columns <= length + strlen(*args) + 4) {
-				(void) printf("\n\t");
-				length = 8;
-			}
-			length += printf(" '%s'", *args);
-		}
-		if (columns <= length + 1) {
-			(void) printf("\n");
-		}
-		(void) printf("\"\n");
-
-		VectorDestroy(list);
-	}
 }
 
 void
