@@ -829,7 +829,10 @@ mxConnect(workspace data, char *domain)
 		goto error0;
 	}
 
-	/* Find preference weight of connected client. */
+	/* If the connected client is one of our upstream MXes,
+	 * then find its preference weigh, so we can call-ahead
+	 * to a MX with lower preference.
+	 */
 	preference = 65535;
 	if ((mx = (PDQ_MX *) pdqListFindHost(list, PDQ_CLASS_IN, PDQ_TYPE_MX, data->work.client_name)) != NULL)
 		preference = mx->preference;
@@ -847,6 +850,7 @@ mxConnect(workspace data, char *domain)
 		|| mx->rr.type != PDQ_TYPE_MX || preference <= mx->preference)
 			continue;
 
+		smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connecting to MX %d %s", TAG_ARGS, mx->preference, mx->host.string.value);
 		if ((socket = socketConnect(mx->host.string.value, SMTP_PORT, optSmtpTimeout.value)) != NULL) {
 			smfLog(SMF_LOG_DIALOG, TAG_FORMAT "connected to MX %d %s", TAG_ARGS, mx->preference, mx->host.string.value);
 
