@@ -15,6 +15,10 @@ is no set schedule for releases.
    +	Add support for :port specifier with host name or IP in RHS
    	of call-ahead-db records. Requested by Mark Hellegers.
 
+--1.14.0--
+
+  **	Configure and build fixes for SunOS.  Reported by warwick.ac.uk.
+
 --1.13.3--
 
    !	More mxConnect() dialogue debug output.

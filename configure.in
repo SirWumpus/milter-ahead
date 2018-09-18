@@ -2,13 +2,13 @@
 #	Thus it begins...
 #######################################################################
 
-AC_INIT(milter-ahead, 1.13, [Anthony Howe <achowe@snert.com>])
+AC_INIT(milter-ahead, 1.14, [Anthony Howe <achowe@snert.com>])
 
 dnl The autoconf version I learned to deal with.
 AC_PREREQ(2.59)
 
 dnl Yes I wrote this mess.
-SNERT_INIT(MILTER, [Copyright 2004, 2012 by Anthony Howe. All rights reserved.])
+SNERT_INIT(MILTER, [Copyright 2004, 2018 by Anthony Howe. All rights reserved.])
 
 AC_SUBST(snert_milter_t_equate, 'C:1m;S:1m;R:6m;E:2m')
 
@@ -83,6 +83,7 @@ if test -f '../lib/version.sh' ; then
 
 	AC_SUBST(HAVE_LIB_RT)
 	AC_SUBST(HAVE_LIB_SEM)
+	AC_SUBST(NETWORK_LIBS)
 
 	AC_SUBST(CFLAGS_DB)
 	AC_SUBST(LDFLAGS_DB)
