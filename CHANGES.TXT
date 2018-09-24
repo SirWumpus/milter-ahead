@@ -17,7 +17,9 @@ is no set schedule for releases.
 
 --1.14.0--
 
-  **	Configure and build fixes for SunOS.  Reported by warwick.ac.uk.
+  !!	Configure and build fixes for SunOS.  Reported by warwick.ac.uk.
+
+   !	Fix -L library directory order for SunOS concerning SQLite linking.
 
 --1.13.3--
 
