@@ -271,6 +271,7 @@ static Option *optTable[] = {
 	&optCacheType,
 	&optCallAheadDb,
 	&optCallAheadHost,
+	PDQ_OPTIONS_TABLE,
 	&optIgnoreRcptHost,
 	&opt_info,
 	&optIsBlindMx,
@@ -1710,8 +1711,7 @@ main(int argc, char **argv)
 
 	(void) smfSetFileOwner(&milter, optCacheFile.string);
 
-	if (smfLogDetail & SMF_LOG_DNS)
-		pdqSetDebug(1);
+	PDQ_OPTIONS_SETTING((smfLogDetail & SMF_LOG_DNS) == SMF_LOG_DNS);
 
 	if (smfLogDetail & SMF_LOG_SOCKET_ALL)
 		socketSetDebug(10);
