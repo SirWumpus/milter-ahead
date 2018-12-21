@@ -1027,7 +1027,7 @@ filterRcpt(SMFICTX *ctx, char **args)
 
 	smfLog(SMF_LOG_DEBUG, TAG_FORMAT "failures %lu from %s [%s]", TAG_ARGS, entry.count, data->work.client_name, data->work.client_addr);
 
-	/* Check for accept-the-bounce domains / hosts. */
+	/* Check for accept-then-bounce domains / hosts. */
 	if (optIsBlindMx.value && *rcpt_host != '\0' && cacheGet(data, rcpt_host, &entry) == 0) {
 		smfLog(SMF_LOG_INFO, TAG_FORMAT "" HOP_INFO_FORMAT "accepts any recipient, skipping", TAG_ARGS, HOP_INFO_ARGS);
 		goto error0;
