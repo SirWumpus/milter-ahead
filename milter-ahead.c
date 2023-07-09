@@ -1,7 +1,7 @@
 /*
  * milter-ahead.c
  *
- * Copyright 2004, 2010 by Anthony Howe. All rights reserved.
+ * Copyright 2004, 2019 by Anthony Howe. All rights reserved.
  *
  * The following should be added to the sendmail.mc file:
  *
@@ -1611,8 +1611,6 @@ printInfo(void)
 int
 main(int argc, char **argv)
 {
-	int argi;
-
 	/* Default is OFF. */
 	smfOptAccessDb.initial = "";
 	smfOptRejectPercentRelay.initial = "-";
@@ -1626,7 +1624,7 @@ main(int argc, char **argv)
 
 	/* Parse command line options looking for a file= option. */
 	optionInit(optTable, smfOptTable, NULL);
-	argi = optionArrayL(argc, argv, optTable, smfOptTable, NULL);
+	(void) optionArrayL(argc, argv, optTable, smfOptTable, NULL);
 
 	/* Parse the option file followed by the command line options again. */
 	if (smfOptFile.string != NULL && *smfOptFile.string != '\0') {
